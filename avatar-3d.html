@@ -519,7 +519,7 @@ function buildAvatar(cfg){
   // crin
   if (cfg.type === "unicornio" || cfg.ex.has("crin")) for (let i=0;i<8;i++) add(G.sphere, toon(new THREE.Color().setHSL(i/8,.95,.62)), [-.02+Math.sin(i)*.015, R*.95 - i*.045, -R*.55 - i*.022], .05-i*.002);
   // cuerno(s), antena, corona, casco, antifaz, gafas, bigotes
-  if (cfg.ex.has("cuerno")){ const h = add(G.cone, toon("#ffd76b"), [0,R*1.15,R*.28], [.035,.2,.035], [.35,0,0]);
+  if (cfg.ex.has("cuerno")){ const h = add(G.cone, toon("#ffd76b"), [0,R*1.2,R*.32], [.05,.3,.05], [.35,0,0]);
     for (let i=0;i<3;i++) add(new THREE.TorusGeometry(1,.12,6,16), toon("#d9a830"), [0,-.25+i*.22,0], [.8-i*.2,.8-i*.2,.8-i*.2], [Math.PI/2,0,0], h, false); }
   if (cfg.ex.has("cuernos")) for (const s of [-1,1]) add(G.cone, toon(cfg.type==="dragon"?"#fff2c4":acc), [s*.085,R*.95,-.02], [.03,.13,.03], [-.35,0,-s*.4]);
   if (cfg.ex.has("antena")){ add(G.cyl, toon("#555"), [0,R*1.05,0], [.008,.12,.008]); const b = add(G.sphere, basic("#ff4d8d"), [0,R*1.05+.07,0], .025, null, head, false); b.userData.glow = true; }
@@ -729,7 +729,7 @@ function updateBackground(){
   if (type === "camara"){
     if (!vidTex){ vidTex = new THREE.VideoTexture(video); vidTex.colorSpace = THREE.SRGBColorSpace; }
     vidTex.wrapS = THREE.RepeatWrapping; vidTex.repeat.x = S.mirror ? -1 : 1; vidTex.offset.x = S.mirror ? 1 : 0;
-    scene.background = vidTex; return;
+    vidTex.needsUpdate = true; scene.background = vidTex; return;
   }
   if (type === "imagen" && S.bgImg){ if (!imgTex || imgTex.image !== S.bgImg){ imgTex = new THREE.Texture(S.bgImg); imgTex.colorSpace = THREE.SRGBColorSpace; imgTex.needsUpdate = true; } scene.background = imgTex; return; }
   const key = type + W + "x" + H;
@@ -906,13 +906,17 @@ function basisQ(right, up){ const u = up.clone().normalize(), r = right.clone().
 function poseModel(rig, now, dt){
   const M = MODEL, {p, head, hands} = rig;
   // El lado con X mayor (derecha de la pantalla) mueve el lado izquierdo del personaje (que mira hacia nosotros)
-  const A = p[11].x >= p[12].x ? {sh:11,el:13,wr:15,hip:23,kn:25,an:27,to:31} : {sh:12,el:14,wr:16,hip:24,kn:26,an:28,to:32};
-  const B = A.sh === 11 ? {sh:12,el:14,wr:16,hip:24,kn:26,an:28,to:32} : {sh:11,el:13,wr:15,hip:23,kn:25,an:27,to:31};
+  // brazos según la posición de los hombros y piernas según la de las caderas (cada lado por separado)
+  const armL = p[11].x >= p[12].x ? {sh:11,el:13,wr:15} : {sh:12,el:14,wr:16}, armR = armL.sh === 11 ? {sh:12,el:14,wr:16} : {sh:11,el:13,wr:15};
+  const legL = p[23].x >= p[24].x ? {hip:23,kn:25,an:27,to:31} : {hip:24,kn:26,an:28,to:32}, legR = legL.hip === 23 ? {hip:24,kn:26,an:28,to:32} : {hip:23,kn:25,an:27,to:31};
+  const A = {...armL, ...legL}, B = {...armR, ...legR};
   const hipMid = p[23].clone().add(p[24]).multiplyScalar(.5), shMid = p[11].clone().add(p[12]).multiplyScalar(.5);
   M.root.position.x = lerp(M.root.position.x, hipMid.x, .3);
   M.root.updateMatrixWorld(true);
   const up = shMid.clone().sub(hipMid);
-  const qHips = basisQ(p[A.hip].clone().sub(p[B.hip]), up), qChest = basisQ(p[A.sh].clone().sub(p[B.sh]), up);
+  const sr = p[A.sh].clone().sub(p[B.sh]), hr = p[A.hip].clone().sub(p[B.hip]);
+  if (hr.dot(sr) < 0) hr.negate();
+  const qHips = basisQ(hr, up), qChest = basisQ(sr, up);
   setWorldRot("hips", qHips);
   const torso = ["spine","chest","upperChest"].filter(n => M.bones[n]);
   torso.forEach((n,i) => setWorldRot(n, qHips.clone().slerp(qChest, (i+1)/torso.length)));
