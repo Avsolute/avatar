@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Avatar 3D en vivo</title>
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/","@pixiv/three-vrm":"https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.5.5/lib/three-vrm.module.min.js"}}</script>
 <style>
   :root{--bg:#111318;--panel:#1b1e26;--line:#2c313d;--txt:#eef1f6;--mut:#9aa3b2;--acc:#ff5fa8;--acc2:#7b6bff;}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -74,6 +74,9 @@
     </div>
     <label class="l" for="sBg">Fondo</label>
     <select id="sBg"></select>
+    <input type="file" id="modelFile0" accept=".vrm,.glb,.gltf" style="display:none">
+    <button class="btn" id="modelPick0">🧍 Usar mi personaje realista (.vrm / .glb) — opcional</button>
+    <div id="modelName0" style="font-size:13px;color:var(--mut);margin-top:-6px"></div>
     <button class="btn pri" id="go">Empezar</button>
     <div id="status"></div>
     <div class="note">Necesita abrirse desde una dirección <b>https://</b> para usar cámara y micrófono. La primera vez descarga la IA (unos 10–30 MB). Para cuerpo entero, apoya el móvil a 2–3 m. Con la cámara trasera, otra persona puede grabarte.</div>
@@ -100,6 +103,14 @@
     <input type="text" id="prompt2">
     <div class="chips" id="chips2"></div>
     <button class="btn pri" id="apply">Aplicar</button>
+  </div>
+  <div class="sec">
+    <h3>Personaje realista (VRM / GLB)</h3>
+    <input type="file" id="modelFile" accept=".vrm,.glb,.gltf" style="display:none">
+    <button class="btn" id="modelPick">Cargar mi personaje (.vrm / .glb)…</button>
+    <button class="btn" id="modelSample">Probar con un personaje de ejemplo</button>
+    <button class="btn" id="modelOff">Volver al muñeco</button>
+    <span style="font-size:13px;color:var(--mut)">Personajes con forma humana y esqueleto: VRoid Studio (gratis, .vrm), Mixamo, Meshy o Tripo (.glb). Los animales a cuatro patas no se pueden mover con el cuerpo de una persona.</span>
   </div>
   <div class="sec">
     <h3>Fondo</h3>
@@ -147,6 +158,8 @@
 <script type="module">
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 /* =========================================================
    Avatar en vivo · versión móvil
    Cámara → MediaPipe (pose, manos, cara) → avatar 2D en canvas
@@ -776,8 +789,172 @@ function renderBg(type, W, H){
 }
 
 
+/* ---------------- Personaje propio (VRM / GLB con esqueleto) ---------------- */
+const SAMPLE_VRM = "https://cdn.jsdelivr.net/gh/pixiv/three-vrm@dev/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm";
+let MODEL = null;
+const BONES = ["hips","spine","chest","upperChest","neck","head",
+  "leftUpperArm","leftLowerArm","leftHand","rightUpperArm","rightLowerArm","rightHand",
+  "leftUpperLeg","leftLowerLeg","leftFoot","leftToes","rightUpperLeg","rightLowerLeg","rightFoot","rightToes"];
+const FINGERS = [["Thumb",["Metacarpal","Proximal","Distal"],[1,2,3,4]],["Index",["Proximal","Intermediate","Distal"],[5,6,7,8]],
+  ["Middle",["Proximal","Intermediate","Distal"],[9,10,11,12]],["Ring",["Proximal","Intermediate","Distal"],[13,14,15,16]],["Little",["Proximal","Intermediate","Distal"],[17,18,19,20]]];
+// Nombres habituales en modelos GLB (Mixamo, Meshy, Tripo, Blender…)
+const NAME_HINTS = {
+  hips:["hips","pelvis","hip","root_hips"], spine:["spine","spine01","spine_01"], chest:["spine1","chest","spine02","spine_02"], upperChest:["spine2","upperchest","spine03","spine_03"],
+  neck:["neck","neck01"], head:["head"],
+  leftUpperArm:["leftarm","upperarml","leftupperarm","larm","arml","upperarmleft","leftshoulder2"], leftLowerArm:["leftforearm","forearml","leftlowerarm","lowerarml","lforearm"], leftHand:["lefthand","handl","lhand"],
+  leftUpperLeg:["leftupleg","thighl","leftupperleg","leftthigh","lthigh","upperlegl"], leftLowerLeg:["leftleg","calfl","shinl","leftlowerleg","leftcalf","lowerlegl","lcalf"], leftFoot:["leftfoot","footl","lfoot"], leftToes:["lefttoebase","toel","lefttoe","toesl","balll","lefttoes"],
+};
+for (const k of Object.keys(NAME_HINTS)) if (k.startsWith("left")) NAME_HINTS["right"+k.slice(4)] = NAME_HINTS[k].map(n => n.replace(/left/g,"right").replace(/l$/,"r").replace(/^l(?=[a-z])/,"r"));
+const normName = n => n.toLowerCase().replace(/^.*:/,"").replace(/^(mixamorig|armature|bip0?1|def|cc_base)[_\s.]*/,"").replace(/[^a-z0-9]/g,"");
+
+function findGlbBones(sceneRoot){
+  const all = []; sceneRoot.traverse(o => { if (o.isBone || o.type === "Bone" || /hips|spine|arm|leg|head/i.test(o.name)) all.push(o); });
+  const byName = new Map(all.map(o => [normName(o.name), o]));
+  const bones = {};
+  for (const [k, hints] of Object.entries(NAME_HINTS)) for (const h of hints){ const b = byName.get(h.replace(/[^a-z0-9]/g,"")); if (b){ bones[k] = b; break; } }
+  // dedos estilo Mixamo: LeftHandIndex1..3, LeftHandThumb1..3
+  for (const side of ["left","right"]) for (const [f, segs] of FINGERS){
+    const mix = {Thumb:"thumb",Index:"index",Middle:"middle",Ring:"ring",Little:"pinky"}[f];
+    segs.forEach((s,i) => { const b = byName.get(`${side}hand${mix}${i+1}`); if (b) bones[side+f+s] = b; });
+  }
+  return bones;
+}
+
+function unloadModel(){
+  if (!MODEL) return;
+  scene.remove(MODEL.root);
+  MODEL.root.traverse(o => { o.geometry?.dispose?.(); const m = o.material; (Array.isArray(m)?m:[m]).forEach(x => x?.dispose?.()); });
+  MODEL = null;
+}
+
+async function loadModel(src, label){
+  const loader = new GLTFLoader();
+  loader.register(parser => new VRMLoaderPlugin(parser));
+  const url = typeof src === "string" ? src : URL.createObjectURL(src);
+  msg("Cargando personaje… 0%", 0);
+  let gltf;
+  try { gltf = await loader.loadAsync(url, e => { if (e.total) msg(`Cargando personaje… ${Math.round(e.loaded/e.total*100)}%`, 0); }); }
+  catch(e){ console.error(e); msg("No se pudo abrir el modelo. Usa un archivo .vrm o .glb", 4500); return false; }
+  finally { if (typeof src !== "string") URL.revokeObjectURL(url); }
+  unloadModel();
+  const root = new THREE.Group(); scene.add(root);
+  const vrm = gltf.userData.vrm;
+  let bones = {};
+  if (vrm){
+    VRMUtils.removeUnnecessaryVertices(gltf.scene);
+    VRMUtils.rotateVRM0(vrm);
+    root.add(vrm.scene);
+    const nr = vrm.humanoid.normalizedHumanBonesRoot; if (nr && !nr.parent) vrm.scene.add(nr);
+    const get = n => vrm.humanoid.getNormalizedBoneNode(n);
+    for (const n of BONES) { const b = get(n); if (b) bones[n] = b; }
+    for (const side of ["left","right"]) for (const [f, segs] of FINGERS) for (const s of segs){ const b = get(side+f+s); if (b) bones[side+f+s] = b; }
+  } else {
+    root.add(gltf.scene);
+    bones = findGlbBones(gltf.scene);
+    // tamaño razonable y pies en el suelo
+    const box = new THREE.Box3().setFromObject(gltf.scene), h = box.max.y - box.min.y;
+    if (h > 0 && (h < .6 || h > 3)) gltf.scene.scale.multiplyScalar(1.7 / h);
+    const box2 = new THREE.Box3().setFromObject(gltf.scene); gltf.scene.position.y -= box2.min.y;
+  }
+  const required = ["hips","leftUpperArm","leftLowerArm","rightUpperArm","rightLowerArm","leftUpperLeg","rightUpperLeg","head"];
+  const missing = required.filter(n => !bones[n]);
+  if (missing.length){ scene.remove(root); msg("Este modelo no tiene un esqueleto humano reconocible (falta: " + missing.join(", ") + ")", 6000); return false; }
+  root.traverse(o => { if (o.isMesh){ o.castShadow = true; o.frustumCulled = false; } });
+  root.updateMatrixWorld(true);
+  // Pose de reposo de cada hueso
+  const rest = {};
+  for (const [n, b] of Object.entries(bones)) rest[n] = {q: b.quaternion.clone(), wq: b.getWorldQuaternion(new THREE.Quaternion()), wp: b.getWorldPosition(V())};
+  const childOf = {leftUpperArm:"leftLowerArm", leftLowerArm:"leftHand", rightUpperArm:"rightLowerArm", rightLowerArm:"rightHand",
+    leftUpperLeg:"leftLowerLeg", leftLowerLeg:"leftFoot", leftFoot:"leftToes", rightUpperLeg:"rightLowerLeg", rightLowerLeg:"rightFoot", rightFoot:"rightToes",
+    leftHand:"leftMiddleProximal", rightHand:"rightMiddleProximal"};
+  for (const side of ["left","right"]) for (const [f, segs] of FINGERS){ for (let i=0;i<segs.length-1;i++) childOf[side+f+segs[i]] = side+f+segs[i+1]; }
+  const dir = {};
+  for (const [n, c] of Object.entries(childOf)) if (bones[n] && bones[c]){
+    const v = rest[c].wp.clone().sub(rest[n].wp); if (v.lengthSq() < 1e-10) continue;
+    dir[n] = v.normalize().applyQuaternion(rest[n].wq.clone().invert());
+  }
+  // último segmento de cada dedo: misma dirección que el anterior
+  for (const side of ["left","right"]) for (const [f, segs] of FINGERS){ const last = side+f+segs[2], prev = side+f+segs[1];
+    if (bones[last] && !dir[last] && dir[prev]) dir[last] = dir[prev].clone(); }
+  const morphs = [];
+  if (!vrm) root.traverse(o => { if (o.morphTargetDictionary) morphs.push(o); });
+  MODEL = {root, vrm, bones, rest, dir, morphs, label, groundY: 0};
+  msg("Personaje cargado: " + label, 3000);
+  return true;
+}
+
+const _pq = new THREE.Quaternion(), _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _v1 = V();
+function setWorldRot(n, qTarget){
+  const b = MODEL.bones[n]; if (!b) return;
+  b.parent.getWorldQuaternion(_pq);
+  b.quaternion.copy(_pq.invert()).multiply(qTarget).multiply(MODEL.rest[n].wq);
+  b.updateWorldMatrix(false, false);
+}
+function setDir(n, from, to){
+  const b = MODEL.bones[n], d0 = MODEL.dir[n]; if (!b || !d0) return;
+  _v1.subVectors(to, from); if (_v1.lengthSq() < 1e-8) return; _v1.normalize();
+  b.parent.getWorldQuaternion(_pq);
+  _q1.copy(_pq).multiply(MODEL.rest[n].q).invert();
+  _v1.applyQuaternion(_q1);
+  _q2.setFromUnitVectors(d0, _v1);
+  b.quaternion.copy(MODEL.rest[n].q).multiply(_q2);
+  b.updateWorldMatrix(false, false);
+}
+function resetBone(n){ const b = MODEL.bones[n]; if (b){ b.quaternion.copy(MODEL.rest[n].q); b.updateWorldMatrix(false,false); } }
+function basisQ(right, up){ const u = up.clone().normalize(), r = right.clone().sub(u.clone().multiplyScalar(right.dot(u))).normalize(), f = r.clone().cross(u).normalize(); return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(r, u, f)); }
+
+function poseModel(rig, now, dt){
+  const M = MODEL, {p, head, hands} = rig;
+  // El lado con X mayor (derecha de la pantalla) mueve el lado izquierdo del personaje (que mira hacia nosotros)
+  const A = p[11].x >= p[12].x ? {sh:11,el:13,wr:15,hip:23,kn:25,an:27,to:31} : {sh:12,el:14,wr:16,hip:24,kn:26,an:28,to:32};
+  const B = A.sh === 11 ? {sh:12,el:14,wr:16,hip:24,kn:26,an:28,to:32} : {sh:11,el:13,wr:15,hip:23,kn:25,an:27,to:31};
+  const hipMid = p[23].clone().add(p[24]).multiplyScalar(.5), shMid = p[11].clone().add(p[12]).multiplyScalar(.5);
+  M.root.position.x = lerp(M.root.position.x, hipMid.x, .3);
+  M.root.updateMatrixWorld(true);
+  const up = shMid.clone().sub(hipMid);
+  const qHips = basisQ(p[A.hip].clone().sub(p[B.hip]), up), qChest = basisQ(p[A.sh].clone().sub(p[B.sh]), up);
+  setWorldRot("hips", qHips);
+  const torso = ["spine","chest","upperChest"].filter(n => M.bones[n]);
+  torso.forEach((n,i) => setWorldRot(n, qHips.clone().slerp(qChest, (i+1)/torso.length)));
+  if (M.bones.neck) setWorldRot("neck", qChest.clone().slerp(head.q, .5));
+  setWorldRot("head", head.q);
+  for (const [S2, X] of [["left",A],["right",B]]){
+    setDir(S2+"UpperArm", p[X.sh], p[X.el]);
+    setDir(S2+"LowerArm", p[X.el], p[X.wr]);
+    const hp = hands[X.wr];
+    if (hp){
+      setDir(S2+"Hand", hp[0], hp[9]);
+      for (const [f, segs, idx] of FINGERS) segs.forEach((s,i) => setDir(S2+f+s, hp[idx[i]], hp[idx[i+1]]));
+    } else {
+      resetBone(S2+"Hand");
+      for (const [f, segs] of FINGERS) segs.forEach(s => resetBone(S2+f+s));
+    }
+    setDir(S2+"UpperLeg", p[X.hip], p[X.kn]);
+    setDir(S2+"LowerLeg", p[X.kn], p[X.an]);
+    setDir(S2+"Foot", p[X.an], p[X.to]);
+  }
+  // Cara
+  const blinkR = head.blinkA, blinkL = head.blinkB, jaw = Math.min(1, head.jaw), smile = Math.min(1, head.smile);
+  if (M.vrm){
+    const em = M.vrm.expressionManager;
+    if (em){ em.setValue("blinkLeft", blinkL); em.setValue("blinkRight", blinkR); em.setValue("aa", jaw); em.setValue("happy", smile*.8); }
+    M.vrm.update(dt);
+  } else {
+    for (const m of M.morphs){ const d = m.morphTargetDictionary, inf = m.morphTargetInfluences;
+      for (const [k,i] of Object.entries(d)){ const kl = k.toLowerCase();
+        if (/blink.*(left|_l\b|l$)|eyeblinkleft/.test(kl)) inf[i] = blinkL; else if (/blink.*(right|_r\b|r$)|eyeblinkright/.test(kl)) inf[i] = blinkR;
+        else if (/^(blink|eyesclosed|eyes_closed)/.test(kl)) inf[i] = (blinkL+blinkR)/2;
+        else if (/jawopen|mouthopen|^aa$|^a$|viseme_aa/.test(kl)) inf[i] = jaw; else if (/mouthsmile$|^smile|happy/.test(kl)) inf[i] = smile; } }
+  }
+  // Pies en el suelo
+  M.root.updateMatrixWorld(true);
+  let minY = Infinity;
+  for (const n of ["leftToes","rightToes","leftFoot","rightFoot"]) if (M.bones[n]){ const y = M.bones[n].getWorldPosition(_v1).y - (n.endsWith("Foot") ? .07 : .02); minY = Math.min(minY, y); }
+  if (isFinite(minY)) M.root.position.y = lerp(M.root.position.y, M.root.position.y - minY, .3);
+}
+
 /* ---------------- Bucle principal ---------------- */
-let fpsN = 0, fpsT = 0, lastCfg = null;
+let fpsN = 0, fpsT = 0, lastCfg = null, lastNow = 0;
 function resize(){
   const dpr = Math.min(window.devicePixelRatio||1, S.quality==="lite" ? 1 : 2);
   renderer.setPixelRatio(dpr); renderer.setSize(innerWidth, innerHeight, false);
@@ -794,7 +971,9 @@ function loop(now){
   updateBackground();
   if (snow.visible){ const a = snow.geometry.attributes.position; for (let i=0;i<a.count;i++){ let y = a.getY(i) - .01; if (y < 0) y = 6; a.setY(i, y); } a.needsUpdate = true; }
   const rig = buildRig(now);
-  poseAvatar(rig, now);
+  const dt = Math.min(.1, (now - (lastNow||now))/1000); lastNow = now;
+  if (AV) AV.root.visible = !MODEL;
+  if (MODEL) { try { poseModel(rig, now, dt); } catch(e){ console.warn(e); } } else poseAvatar(rig, now);
   if (S.skel) drawSkeleton(rig.p); else if (skelLines) skelLines.visible = false;
   controls.autoRotate = autoRotate; controls.autoRotateSpeed = 1.5;
   if (S.autoframe !== false) controls.target.x = lerp(controls.target.x, 0, .1);
@@ -832,6 +1011,7 @@ $("go").onclick = async () => {
   }catch(e){ console.error(e); status("❌ " + (e.name==="NotAllowedError" ? "Permiso denegado. Actívalo en los ajustes del navegador." : (e.message||e))); $("go").disabled=false; return; }
   savePrefs(); resize(); keepAwake();
   $("start").style.display = "none"; S.running = true; requestAnimationFrame(loop);
+  if (pendingModel) loadModel(pendingModel, pendingModel.name);
   msg("Toca ⚙️ para cambiar avatar, fondo o voz", 3500);
 };
 
@@ -870,6 +1050,15 @@ const VIEW_ORDER = ["frontal","tres","lateral","arriba"];
 $("view").onchange = e => setView(e.target.value);
 $("spin").onchange = e => autoRotate = e.target.checked;
 $("bView").onclick = () => { const n = VIEW_ORDER[(VIEW_ORDER.indexOf(viewName)+1) % VIEW_ORDER.length]; setView(n); $("view").value = n; msg({frontal:"Vista frontal",tres:"Vista tres cuartos",lateral:"Vista lateral",arriba:"Vista desde arriba"}[n]); };
+
+
+let pendingModel = null;
+$("modelPick0").onclick = () => $("modelFile0").click();
+$("modelFile0").onchange = e => { pendingModel = e.target.files[0] || null; $("modelName0").textContent = pendingModel ? "Personaje: " + pendingModel.name : ""; };
+$("modelPick").onclick = () => $("modelFile").click();
+$("modelFile").onchange = async e => { const f = e.target.files[0]; if (!f) return; openSheet(false); await loadModel(f, f.name); e.target.value = ""; };
+$("modelSample").onclick = async () => { openSheet(false); await loadModel(SAMPLE_VRM, "personaje de ejemplo (pixiv)"); };
+$("modelOff").onclick = () => { unloadModel(); openSheet(false); msg("Muñeco 3D"); };
 
 /* ---------------- Grabación ---------------- */
 let rec, chunks = [], recBlob, recExt;
