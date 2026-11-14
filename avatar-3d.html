@@ -55,6 +55,26 @@
   /* Diálogo vídeo */
   #dlg{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:20px}
   #dlg .box{background:var(--panel);border-radius:18px;padding:18px;max-width:420px;width:100%;display:flex;flex-direction:column;gap:10px}
+  .btn.sm{min-height:38px;padding:0 12px;border-radius:10px;font-size:14px}
+  .chip.on{background:linear-gradient(135deg,var(--acc),var(--acc2));border-color:transparent}
+  .librow{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .librow b{flex:1;font-weight:600;font-size:15px;color:var(--txt)}
+  .librow.act b::after{content:" ✓";color:#5cff8a}
+  #editor{position:fixed;z-index:16;display:none;flex-direction:column;background:var(--panel);border:1px solid var(--line)}
+  .editing #editor{display:flex}
+  .editing #bar,.editing #fps,.editing #rec{display:none!important}
+  @media (min-width:821px){ #editor{right:12px;top:12px;bottom:12px;width:380px;border-radius:18px} }
+  @media (max-width:820px){ #editor{left:0;right:0;bottom:0;height:52vh;border-radius:22px 22px 0 0} }
+  .edhead{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 6px}
+  .edbody{flex:1;overflow-y:auto;padding:4px 16px}
+  .edbody .sec{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+  .edbody h3{margin:0;font-size:14px;color:var(--mut);font-weight:600}
+  .edrow{display:flex;flex-direction:column;gap:4px;font-size:14px}
+  .edrow.tog{flex-direction:row;align-items:center;justify-content:space-between;min-height:40px}
+  .edrow input[type=color]{width:100%;height:40px;border:1px solid var(--line);border-radius:10px;background:none;padding:2px}
+  .edrow input[type=range]{height:28px}
+  .edfoot{display:flex;gap:8px;padding:10px 16px calc(env(safe-area-inset-bottom) + 12px);border-top:1px solid var(--line)}
+  .edfoot .btn{flex:1;padding:0 8px}
 </style>
 </head>
 <body>
@@ -74,6 +94,8 @@
     </div>
     <label class="l" for="sBg">Fondo</label>
     <select id="sBg"></select>
+    <div class="note" style="display:flex;flex-direction:column;gap:8px"><b style="color:var(--txt)">Mis personajes</b><div id="libList0"></div>
+      <button class="btn" id="edNew0">✨ Crear un personaje nuevo</button></div>
     <input type="file" id="modelFile0" accept=".vrm,.glb,.gltf" style="display:none">
     <button class="btn" id="modelPick0">🧍 Usar mi personaje realista (.vrm / .glb) — opcional</button>
     <div id="modelName0" style="font-size:13px;color:var(--mut);margin-top:-6px"></div>
@@ -103,6 +125,11 @@
     <input type="text" id="prompt2">
     <div class="chips" id="chips2"></div>
     <button class="btn pri" id="apply">Aplicar</button>
+  </div>
+  <div class="sec">
+    <h3>Mis personajes</h3>
+    <div id="libList"></div>
+    <button class="btn pri" id="edNew">✨ Crear un personaje nuevo</button>
   </div>
   <div class="sec">
     <h3>Personaje realista (VRM / GLB)</h3>
@@ -147,6 +174,16 @@
   <button class="btn" id="close" style="width:100%">Cerrar</button>
 </div>
 
+<div id="editor">
+  <div class="edhead"><b>✨ Editor de personajes</b><button class="btn sm" id="edClose">✕</button></div>
+  <div class="edbody">
+    <div class="sec"><h3>Nombre</h3><input type="text" id="edName"></div>
+    <div class="sec"><h3>Empezar desde una frase</h3><div class="row"><input type="text" id="edPrompt" placeholder="Ej.: un unicornio de colores"><button class="btn" id="edFromPrompt" style="flex:0 0 auto">Crear</button></div></div>
+    <div id="edForm"></div>
+  </div>
+  <div class="edfoot"><button class="btn" id="edSave">💾 Guardar</button><button class="btn" id="edExport">⬇ .glb</button><button class="btn pri" id="edUse">Usar</button></div>
+</div>
+<div id="confirm" style="position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:20px"><div class="box" style="background:var(--panel);border-radius:18px;padding:18px;max-width:380px;width:100%;display:flex;flex-direction:column;gap:10px"><span id="confirmTxt"></span><div class="row"><button class="btn" id="confirmNo">Cancelar</button><button class="btn pri" id="confirmYes">Borrar</button></div></div></div>
 <div id="dlg"><div class="box">
   <b>Vídeo grabado</b>
   <span id="dlgInfo" style="color:var(--mut);font-size:14px"></span>
@@ -160,6 +197,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 /* =========================================================
    Avatar en vivo · versión móvil
    Cámara → MediaPipe (pose, manos, cara) → avatar 2D en canvas
@@ -593,8 +632,8 @@ function idlePose(t){
 }
 
 /* ---------------- Esqueleto con relleno de piernas ---------------- */
-function buildRig(now){
-  const idle = !T.pose || now - T.lastSeen > 1500;
+function buildRig(now, forceIdle){
+  const idle = forceIdle || !T.pose || now - T.lastSeen > 1500;
   const p = (idle ? idlePose(now) : T.pose).map(q => V(q.x,q.y,q.z));
   const vis = idle ? () => true : i => T.pose[i].v > .5;
   const shMid = p[11].clone().add(p[12]).multiplyScalar(.5);
@@ -615,7 +654,7 @@ function buildRig(now){
   st.x = lerp(st.x, rootX, .15); st.y = lerp(st.y, -floorY, idle ? 1 : .25);
   for (const q of p){ q.x += st.x; q.y += st.y; }
   // Cabeza
-  const face = (T.face && now - T.faceT < 400) ? T.face : null;
+  const face = (!forceIdle && T.face && now - T.faceT < 400) ? T.face : null;
   const earA = p[7], earB = p[8];
   const headC = earA.clone().add(earB).multiplyScalar(.5).add(V(0,.06,0));
   let r, u, f;
@@ -856,6 +895,13 @@ async function loadModel(src, label){
     if (h > 0 && (h < .6 || h > 3)) gltf.scene.scale.multiplyScalar(1.7 / h);
     const box2 = new THREE.Box3().setFromObject(gltf.scene); gltf.scene.position.y -= box2.min.y;
   }
+  const morphs = [];
+  if (!vrm) root.traverse(o => { if (o.morphTargetDictionary) morphs.push(o); });
+  return registerModel(root, bones, {vrm, label, morphs});
+}
+
+function registerModel(root, bones, opts){
+  const {vrm=null, label="", morphs=[], face=null, quiet=false} = opts;
   const required = ["hips","leftUpperArm","leftLowerArm","rightUpperArm","rightLowerArm","leftUpperLeg","rightUpperLeg","head"];
   const missing = required.filter(n => !bones[n]);
   if (missing.length){ scene.remove(root); msg("Este modelo no tiene un esqueleto humano reconocible (falta: " + missing.join(", ") + ")", 6000); return false; }
@@ -876,10 +922,8 @@ async function loadModel(src, label){
   // último segmento de cada dedo: misma dirección que el anterior
   for (const side of ["left","right"]) for (const [f, segs] of FINGERS){ const last = side+f+segs[2], prev = side+f+segs[1];
     if (bones[last] && !dir[last] && dir[prev]) dir[last] = dir[prev].clone(); }
-  const morphs = [];
-  if (!vrm) root.traverse(o => { if (o.morphTargetDictionary) morphs.push(o); });
-  MODEL = {root, vrm, bones, rest, dir, morphs, label, groundY: 0};
-  msg("Personaje cargado: " + label, 3000);
+  MODEL = {root, vrm, bones, rest, dir, morphs, label, face, groundY: 0};
+  if (!quiet) msg("Personaje cargado: " + label, 3000);
   return true;
 }
 
@@ -950,6 +994,7 @@ function poseModel(rig, now, dt){
         else if (/^(blink|eyesclosed|eyes_closed)/.test(kl)) inf[i] = (blinkL+blinkR)/2;
         else if (/jawopen|mouthopen|^aa$|^a$|viseme_aa/.test(kl)) inf[i] = jaw; else if (/mouthsmile$|^smile|happy/.test(kl)) inf[i] = smile; } }
   }
+  if (M.face) updateFace(M, head, now);
   // Pies en el suelo
   M.root.updateMatrixWorld(true);
   let minY = Infinity;
@@ -968,13 +1013,14 @@ function resize(){
 }
 addEventListener("resize", resize); resize();
 
+function ensureLoop(){ if (S.looping) return; S.looping = true; S.running = true; requestAnimationFrame(loop); }
 function loop(now){
   if (!S.running) return;
   try { detect(now); } catch(e){ console.warn(e); }
   if (S.cfg !== lastCfg){ buildAvatar(S.cfg); lastCfg = S.cfg; bgKey = ""; }
   updateBackground();
   if (snow.visible){ const a = snow.geometry.attributes.position; for (let i=0;i<a.count;i++){ let y = a.getY(i) - .01; if (y < 0) y = 6; a.setY(i, y); } a.needsUpdate = true; }
-  const rig = buildRig(now);
+  const rig = buildRig(now, !!S.editing);
   const dt = Math.min(.1, (now - (lastNow||now))/1000); lastNow = now;
   if (AV) AV.root.visible = !MODEL;
   if (MODEL) { try { poseModel(rig, now, dt); } catch(e){ console.warn(e); } } else poseAvatar(rig, now);
@@ -983,8 +1029,10 @@ function loop(now){
   if (S.autoframe !== false) controls.target.x = lerp(controls.target.x, 0, .1);
   controls.update();
   renderer.render(scene, camera);
-  if (rig.idle && !$("msg").dataset.idle){ $("msg").dataset.idle = 1; msg("Ponte delante de la cámara 👋", 0); }
-  if (!rig.idle && $("msg").dataset.idle){ delete $("msg").dataset.idle; $("msg").style.display="none"; }
+  if (S.editing){ const W = innerWidth, H = innerHeight; if (W > 820) camera.setViewOffset(W, H, W*.2, 0, W, H); else camera.setViewOffset(W, H, 0, H*.24, W, H); }
+  else if (camera.view && camera.view.enabled) camera.clearViewOffset();
+  if (rig.idle && !S.editing && !$("msg").dataset.idle){ $("msg").dataset.idle = 1; msg("Ponte delante de la cámara 👋", 0); }
+  if ((!rig.idle || S.editing) && $("msg").dataset.idle){ delete $("msg").dataset.idle; $("msg").style.display="none"; }
   fpsN++; if (now - fpsT > 1000){ $("fps").textContent = S.showFps ? `${fpsN} fps` : ""; $("fps").style.display = S.showFps?"block":"none"; fpsN = 0; fpsT = now; }
   requestAnimationFrame(loop);
 }
@@ -1014,8 +1062,9 @@ $("go").onclick = async () => {
     await ensureModels();
   }catch(e){ console.error(e); status("❌ " + (e.name==="NotAllowedError" ? "Permiso denegado. Actívalo en los ajustes del navegador." : (e.message||e))); $("go").disabled=false; return; }
   savePrefs(); resize(); keepAwake();
-  $("start").style.display = "none"; S.running = true; requestAnimationFrame(loop);
+  $("start").style.display = "none"; S.camOn = true; ensureLoop();
   if (pendingModel) loadModel(pendingModel, pendingModel.name);
+  else if (!MODEL){ const act = libLoad().find(x => x.id === libActive()); if (act) useCharacter(act.st); }
   msg("Toca ⚙️ para cambiar avatar, fondo o voz", 3500);
 };
 
@@ -1064,6 +1113,341 @@ $("modelFile").onchange = async e => { const f = e.target.files[0]; if (!f) retu
 $("modelSample").onclick = async () => { openSheet(false); await loadModel(SAMPLE_VRM, "personaje de ejemplo (pixiv)"); };
 $("modelOff").onclick = () => { unloadModel(); openSheet(false); msg("Muñeco 3D"); };
 
+/* =========================================================
+   Editor de personajes: malla continua con esqueleto propio
+   ========================================================= */
+const CH_DEF = {name:"Mi personaje", height:1, build:1, head:1,
+  skin:"#ffd7b8", top:"#ff5fa8", bottom:"#3a4a8f", shoes:"#ffffff", hair:"#5a3a22", acc:"#ffcf33",
+  pattern:"liso", sleeves:"corta", legs:"largo", eyes:"redondos", mouth:"sonrisa", nose:"boton", cheeks:true,
+  ears:"humanas", hairStyle:"corto", extras:[], wings:"no", tail:"no", cape:false, sparkles:false};
+
+function settingsFromPrompt(text){
+  const c = parsePrompt(text), s = {...CH_DEF, extras:[]};
+  s.name = text.replace(/^quiero ser (un|una)?\s*/i,"").replace(/^(un|una)\s+/i,"").slice(0,40) || "Mi personaje";
+  const ex = c.ex, add = (...k) => k.forEach(x => !s.extras.includes(x) && s.extras.push(x));
+  const T = {
+    unicornio: () => Object.assign(s,{skin:"#fff4fb", top:"#ffffff", pattern:"arcoiris", bottom:"#c9a6ff", shoes:"#c9a6ff", hair:"#ff7ac8", hairStyle:"crin", ears:"caballo", nose:"hocico", tail:"arcoiris", sparkles:true}) && add("cuerno"),
+    robot: () => Object.assign(s,{skin:"#9aa7b8", top:"#7d8a9c", bottom:"#5a6575", shoes:"#3a4350", acc:"#39d0ff", eyes:"robot", hairStyle:"ninguno", ears:"ninguna", nose:"ninguna", cheeks:false, sleeves:"larga"}) && add("antena"),
+    dragon: () => Object.assign(s,{skin:"#3fbf6a", top:"#2e9a52", bottom:"#2a7a44", shoes:"#2a6a3a", acc:"#ffcc33", hairStyle:"ninguno", ears:"ninguna", nose:"hocico", wings:"dragon", tail:"dragon", cheeks:false, sleeves:"sin", legs:"corto"}) && add("cuernos","pinchos"),
+    gato: () => Object.assign(s,{skin:"#ffa94d", top:"#fff1e0", bottom:"#ffa94d", shoes:"#ffa94d", hairStyle:"ninguno", ears:"gato", nose:"animal", tail:"gato", sleeves:"sin", legs:"corto"}) && add("bigotes"),
+    perro: () => Object.assign(s,{skin:"#c68b59", top:"#f3dcc4", bottom:"#c68b59", shoes:"#8a5a35", hair:"#8a5a35", hairStyle:"ninguno", ears:"perro", nose:"hocico", tail:"perro", sleeves:"sin", legs:"corto"}),
+    oso: () => Object.assign(s,{skin:"#8b5a2b", top:"#d8b48c", bottom:"#8b5a2b", shoes:"#5e3b1c", hairStyle:"ninguno", ears:"oso", nose:"hocico", sleeves:"sin", legs:"corto"}),
+    astronauta: () => Object.assign(s,{top:"#f2f2f2", bottom:"#f2f2f2", shoes:"#cccccc", acc:"#ff8c2a", sleeves:"larga", legs:"largo"}) && add("casco","mochila"),
+    hada: () => Object.assign(s,{top:"#ffd1f0", bottom:"#b06bff", shoes:"#ffd1f0", hair:"#ffcf33", acc:"#b06bff", hairStyle:"largo", wings:"hada", sparkles:true}) && add("corona"),
+    superheroe: () => Object.assign(s,{top:"#3355ff", bottom:"#3355ff", shoes:"#ff3344", acc:"#ff3344", sleeves:"larga", legs:"largo", cape:true}) && add("antifaz"),
+    monstruo: () => Object.assign(s,{skin:"#8e44ff", top:"#c6ff3d", bottom:"#5a2aa0", shoes:"#5a2aa0", acc:"#c6ff3d", eyes:"tres", mouth:"dientes", hairStyle:"ninguno", ears:"ninguna", nose:"ninguna", cheeks:false, sleeves:"sin"}) && add("cuernos"),
+    muneco: () => {},
+  };
+  (T[c.type] || T.muneco)();
+  // colores y extras pedidos en la frase
+  const words = norm(text).split(/[^a-z0-9ñ]+/);
+  const cols = words.filter(w => COLORS[w]).map(w => COLORS[w]);
+  if (cols[0]){ if (["unicornio","robot","dragon","gato","perro","oso","monstruo"].includes(c.type)) s.skin = cols[0]; else s.top = cols[0]; }
+  if (cols[1]) s.bottom = cols[1];
+  if (c.rainbow) s.pattern = "arcoiris";
+  if (ex.has("alas") && s.wings === "no") s.wings = c.type==="dragon" ? "dragon" : c.type==="hada" ? "hada" : "angel";
+  if (ex.has("cola") && s.tail === "no") s.tail = c.rainbow ? "arcoiris" : "gato";
+  if (ex.has("capa")) s.cape = true;
+  if (ex.has("brillos")) s.sparkles = true;
+  for (const k of ["cuerno","cuernos","corona","antena","casco","antifaz","gafas","bigotes"]) if (ex.has(k)) add(k);
+  if (/sin alas/.test(norm(text))) s.wings = "no";
+  return s;
+}
+
+const EDIT_SCHEMA = [
+  ["Cuerpo", [["height","Altura","range",.8,1.25,.01],["build","Complexión","range",.75,1.4,.01],["head","Tamaño de la cabeza","range",.8,1.5,.01]]],
+  ["Colores", [["skin","Piel / pelaje","color"],["top","Ropa de arriba","color"],["bottom","Ropa de abajo","color"],["shoes","Calzado / pezuñas","color"],["hair","Pelo","color"],["acc","Detalles (capa, cuernos…)","color"]]],
+  ["Ropa", [["pattern","Estampado","select",[["liso","Liso"],["arcoiris","Arcoíris"],["rayas","Rayas"],["degradado","Degradado"]]],
+            ["sleeves","Mangas","select",[["corta","Cortas"],["larga","Largas"],["sin","Sin mangas"]]],
+            ["legs","Pantalón","select",[["largo","Largo"],["corto","Corto"]]]]],
+  ["Cara", [["eyes","Ojos","select",[["redondos","Redondos"],["grandes","Grandes"],["robot","De robot"],["tres","Tres ojos"]]],
+            ["mouth","Boca","select",[["sonrisa","Sonrisa"],["dientes","Con colmillos"]]],
+            ["nose","Nariz","select",[["boton","Pequeña"],["animal","De animal"],["hocico","Hocico"],["ninguna","Ninguna"]]],
+            ["cheeks","Mejillas sonrosadas","check"]]],
+  ["Cabeza", [["ears","Orejas","select",[["humanas","Humanas"],["gato","De gato"],["caballo","De caballo"],["oso","De oso"],["perro","De perro"],["conejo","De conejo"],["elfo","De elfo"],["ninguna","Ninguna"]]],
+              ["hairStyle","Pelo","select",[["corto","Corto"],["largo","Largo"],["coletas","Coletas"],["crin","Crin arcoíris"],["ninguno","Sin pelo"]]],
+              ["extras","Accesorios","multi",[["cuerno","Cuerno"],["cuernos","Cuernos"],["corona","Corona"],["antena","Antena"],["casco","Casco"],["antifaz","Antifaz"],["gafas","Gafas"],["bigotes","Bigotes"]]]]],
+  ["Espalda", [["wings","Alas","select",[["no","Sin alas"],["angel","De ángel"],["dragon","De dragón"],["hada","De hada"]]],
+               ["tail","Cola","select",[["no","Sin cola"],["gato","De gato"],["perro","De perro"],["dragon","De dragón"],["arcoiris","Arcoíris"]]],
+               ["cape","Capa","check"],["extras","Más","multi",[["pinchos","Pinchos"],["mochila","Mochila"]]],["sparkles","Brillos alrededor","check"]]],
+];
+
+/* ---------- Construcción de la malla con esqueleto ---------- */
+function buildCharacter(st){
+  const w = Math.sqrt(st.build), hs = st.head, th = st.build;
+  const J = {   // articulaciones en reposo (pose en T, mirando a +Z, su izquierda en +X)
+    hips:V(0,.95,0), spine:V(0,1.07,0), chest:V(0,1.22,0), neck:V(0,1.43,0), head:V(0,1.5,0),
+    leftUpperArm:V(.2*w,1.38,0), leftLowerArm:V(.2*w+.27,1.38,0), leftHand:V(.2*w+.52,1.38,0),
+    leftUpperLeg:V(.1*w,.92,0), leftLowerLeg:V(.1*w,.52,0), leftFoot:V(.1*w,.1,0), leftToes:V(.1*w,.03,.11),
+  };
+  for (const k of Object.keys(J)) if (k.startsWith("left")) J["right"+k.slice(4)] = V(-J[k].x, J[k].y, J[k].z);
+  const parentOf = {spine:"hips", chest:"spine", neck:"chest", head:"neck",
+    leftUpperArm:"chest", leftLowerArm:"leftUpperArm", leftHand:"leftLowerArm", leftUpperLeg:"hips", leftLowerLeg:"leftUpperLeg", leftFoot:"leftLowerLeg", leftToes:"leftFoot"};
+  for (const k of Object.keys(parentOf)) if (k.startsWith("left")) parentOf["right"+k.slice(4)] = parentOf[k].replace("left","right");
+  const names = Object.keys(J), bones = {}, list = [];
+  for (const n of names){ const b = new THREE.Bone(); b.name = n; bones[n] = b; list.push(b); }
+  for (const n of names){ const p = parentOf[n]; if (p){ bones[p].add(bones[n]); bones[n].position.copy(J[n]).sub(J[p]); } else bones[n].position.copy(J[n]); }
+  // segmentos para el reparto de pesos
+  const tipOf = {hips:J.spine, spine:J.chest, chest:J.neck, neck:J.head, head:J.head.clone().add(V(0,.3*hs,0)),
+    leftUpperArm:J.leftLowerArm, leftLowerArm:J.leftHand, leftHand:J.leftHand.clone().add(V(.12,0,0)),
+    leftUpperLeg:J.leftLowerLeg, leftLowerLeg:J.leftFoot, leftFoot:J.leftToes, leftToes:J.leftToes.clone().add(V(0,0,.07))};
+  for (const k of Object.keys(tipOf)) if (k.startsWith("left")){ const t = tipOf[k]; tipOf["right"+k.slice(4)] = V(-t.x, t.y, t.z); }
+  const idx = Object.fromEntries(names.map((n,i) => [n,i]));
+  const segDist = (p, a, b) => { const ab = _d.subVectors(b,a), t = Math.max(0, Math.min(1, ab.dot(V().subVectors(p,a)) / (ab.lengthSq()||1))); return p.distanceTo(V().copy(a).addScaledVector(ab, t)); };
+
+  const ZONE = {skin:0, top:1, bottom:2, shoes:3, hair:4, acc:5};
+  const zoneCol = z => new THREE.Color([st.skin, st.top, st.bottom, st.shoes, st.hair, st.acc][z]);
+  const parts = [];
+  function part(geo, zone, cand){
+    const pos = geo.attributes.position, n = pos.count;
+    const si = new Uint16Array(n*4), sw = new Float32Array(n*4), col = new Float32Array(n*3), p = V();
+    const base = zoneCol(zone), white = new THREE.Color(1,1,1), c2 = new THREE.Color(st.acc), tmp = new THREE.Color();
+    for (let i=0;i<n;i++){
+      p.fromBufferAttribute(pos, i);
+      const ws = cand.map(b => { const d = segDist(p, J[b], tipOf[b]); return [b, 1/Math.pow(Math.max(d,.004), 6)]; }).sort((a,b) => b[1]-a[1]).slice(0,4);
+      const tot = ws.reduce((s,x) => s + x[1], 0);
+      ws.forEach(([b,v],k) => { si[i*4+k] = idx[b]; sw[i*4+k] = v/tot; });
+      // estampado de la ropa
+      tmp.copy(base);
+      if ((zone === 1 || zone === 2) && st.pattern !== "liso"){
+        if (st.pattern === "arcoiris") tmp.setHSL(((p.y*1.6 + p.x*.4) % 1 + 1) % 1, .9, .62);
+        else if (st.pattern === "rayas") { if (Math.floor(p.y*22) % 2) tmp.lerp(white, .75); }
+        else if (st.pattern === "degradado") tmp.lerp(c2, Math.min(1, Math.max(0, (1.45 - p.y) / .9)));
+      }
+      col[i*3] = tmp.r; col[i*3+1] = tmp.g; col[i*3+2] = tmp.b;
+    }
+    geo.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(si, 4));
+    geo.setAttribute("skinWeight", new THREE.Float32BufferAttribute(sw, 4));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    parts.push({geo, zone});
+  }
+  const capsule = (a, b, r, zone, cand) => { const len = a.distanceTo(b); const g = new THREE.CapsuleGeometry(r, len, 6, 18);
+    g.applyMatrix4(new THREE.Matrix4().compose(V().addVectors(a,b).multiplyScalar(.5), new THREE.Quaternion().setFromUnitVectors(UP, V().subVectors(b,a).normalize()), V(1,1,1))); part(g, zone, cand); };
+  const ell = (c, sx, sy, sz, zone, cand, seg=[24,16]) => { const g = new THREE.SphereGeometry(1, seg[0], seg[1]); g.applyMatrix4(new THREE.Matrix4().makeScale(sx,sy,sz)); g.translate(c.x,c.y,c.z); part(g, zone, cand); };
+  const lathe = (prof, sz, zone, cand) => { const g = new THREE.LatheGeometry(prof.map(([r,y]) => new THREE.Vector2(r,y)), 28); g.applyMatrix4(new THREE.Matrix4().makeScale(1,1,sz)); part(g, zone, cand); };
+
+  const torsoC = ["hips","spine","chest","neck"];
+  // tronco: parte de abajo (pantalón) y de arriba (camiseta)
+  lathe([[0,.84],[.1*w*th,.845],[.155*w*th,.88],[.16*w*th,.96],[.145*w*th,1.04],[.13*w*th,1.08],[0,1.09]], .72, ZONE.bottom, torsoC);
+  lathe([[0,1.0],[.135*w*th,1.01],[.13*w*th,1.08],[.15*w*th,1.2],[.175*w*th,1.32],[.17*w*th,1.4],[.1*th,1.45],[0,1.46]], .7, ZONE.top, torsoC);
+  capsule(J.neck, J.head.clone().add(V(0,.05,0)), .05*th, ZONE.skin, ["chest","neck","head"]);
+  // cabeza (rígida)
+  const R = .155*hs, hc = J.head.clone().add(V(0, R*.82, 0));
+  ell(hc, R, R*.97, R*.95, st.eyes === "robot" ? ZONE.skin : ZONE.skin, ["head"], [32,22]);
+  for (const s of ["left","right"]){
+    const up = J[s+"UpperArm"], lo = J[s+"LowerArm"], ha = J[s+"Hand"], sg = s === "left" ? 1 : -1;
+    const armTop = st.sleeves === "sin" ? ZONE.skin : ZONE.top, armLow = st.sleeves === "larga" ? ZONE.top : ZONE.skin;
+    capsule(up.clone().add(V(-.03*sg,0,0)), lo, .055*th, armTop, ["chest", s+"UpperArm", s+"LowerArm"]);
+    capsule(lo, ha, .045*th, armLow, [s+"UpperArm", s+"LowerArm", s+"Hand"]);
+    ell(ha.clone().add(V(.055*sg,0,0)), .06, .028, .048, ZONE.skin, [s+"LowerArm", s+"Hand"]);
+    capsule(ha.clone().add(V(.02*sg,0,.035)), ha.clone().add(V(.05*sg,0,.075)), .016, ZONE.skin, [s+"Hand"]);
+    const hip = J[s+"UpperLeg"], kn = J[s+"LowerLeg"], an = J[s+"Foot"];
+    capsule(hip, kn, .075*th, ZONE.bottom, ["hips", s+"UpperLeg", s+"LowerLeg"]);
+    capsule(kn, an.clone().add(V(0,.02,0)), .058*th, st.legs === "corto" ? ZONE.skin : ZONE.bottom, [s+"UpperLeg", s+"LowerLeg", s+"Foot"]);
+    ell(an.clone().add(V(0,-.045,.05)), .06, .045, .12, ZONE.shoes, [s+"LowerLeg", s+"Foot", s+"Toes"]);
+  }
+  const geo = mergeGeometries(parts.map(p => p.geo), true);
+  parts.forEach((p,i) => geo.groups[i].materialIndex = p.zone);
+  const mats = [0,1,2,3,4,5].map(() => new THREE.MeshToonMaterial({color:0xffffff, gradientMap:gradTex, vertexColors:true}));
+  const body = new THREE.SkinnedMesh(geo, mats);
+  body.add(bones.hips);
+  body.updateMatrixWorld(true);
+  body.bind(new THREE.Skeleton(list));
+  body.castShadow = true; body.frustumCulled = false; body.name = "cuerpo";
+
+  // ---- Accesorios rígidos pegados a los huesos ----
+  const hb = bones.head, ho = J.head;  // origen del hueso cabeza
+  const T = (x,y,z) => V(x, y + R*.82, z);  // coordenadas relativas al centro de la cabeza
+  const M = (c, extra={}) => new THREE.MeshToonMaterial({color:new THREE.Color(c), gradientMap:gradTex, ...extra});
+  const B = (c, extra={}) => new THREE.MeshBasicMaterial({color:new THREE.Color(c), ...extra});
+  const put = (geo, mat, par, pos, scale, rot) => { const m = new THREE.Mesh(geo, mat); m.position.copy(pos); if (typeof scale === "number") m.scale.setScalar(scale); else m.scale.set(...scale); if (rot) m.rotation.set(...rot); m.castShadow = true; par.add(m); return m; };
+  const skinM = M(st.skin), hairM = M(st.hair), accM = M(st.acc), darkM = M("#1c1630"), whiteM = M("#ffffff");
+  const lighter = new THREE.Color(st.skin).lerp(new THREE.Color("#ffffff"), .35);
+  const face = {eyes:[], mouthOpen:null, smile:null, glow:[]};
+  // ojos
+  const big = st.eyes === "grandes" ? 1.3 : 1;
+  const eyeP = st.eyes === "tres" ? [[-.38,.12],[.38,.12],[0,.48]] : [[-.38,.1],[.38,.1]];
+  for (const [ex, ey] of eyeP){
+    const g = new THREE.Group(); g.position.copy(T(ex*R, ey*R, R*.86)); hb.add(g);
+    if (st.eyes === "robot"){ const m = put(G.box, B(st.acc), g, V(0,0,.012), [.075*hs,.038*hs,.01]); face.glow.push(m); }
+    else { put(G.sphere, whiteM, g, V(0,0,0), [.042*hs*big,.05*hs*big,.03*hs]); put(G.sphere, darkM, g, V(0,-.004,.022*hs), [.024*hs*big,.03*hs*big,.015*hs]); put(G.sphere, B("#ffffff"), g, V(.01*hs,.012*hs,.034*hs), .007*hs*big); }
+    face.eyes.push(g);
+  }
+  // nariz / hocico
+  if (st.nose === "hocico"){ put(G.sphere, M(lighter), hb, T(0,-R*.35,R*.8), [R*.5,R*.36,R*.4]); put(G.sphere, darkM, hb, T(0,-R*.22,R*1.15), [R*.12,R*.08,R*.08]); }
+  else if (st.nose === "animal") put(G.sphere, darkM, hb, T(0,-R*.15,R*.98), [R*.13,R*.09,R*.09]);
+  else if (st.nose === "boton") put(G.sphere, M(new THREE.Color(st.skin).multiplyScalar(.92)), hb, T(0,-R*.12,R*.97), R*.09);
+  // boca
+  const my = st.nose === "hocico" ? -R*.55 : -R*.45, mz = st.nose === "hocico" ? R*1.0 : R*.9;
+  face.mouthOpen = put(G.sphere, M(st.eyes==="robot"?st.acc:"#5a1730"), hb, T(0,my,mz), [.04,.01,.02]);
+  face.smile = put(new THREE.TorusGeometry(.03*hs,.006*hs,8,20,Math.PI), M(st.eyes==="robot"?st.acc:"#3a1a2a"), hb, T(0,my+R*.08,mz+.005), 1, [0,0,Math.PI]);
+  if (st.mouth === "dientes") for (const s of [-1,1]) put(G.cone, whiteM, hb, T(s*.022*hs,my+R*.02,mz+.01), [.008,.022,.008], [Math.PI,0,0]);
+  if (st.cheeks) for (const s of [-1,1]) put(G.sphere, B("#ff8fb0",{transparent:true,opacity:.6}), hb, T(s*R*.65,-R*.2,R*.78), [R*.17,R*.1,R*.06]);
+  // orejas
+  const earM = st.ears === "perro" ? hairM : skinM;
+  if (st.ears === "humanas") for (const s of [-1,1]) put(G.sphere, skinM, hb, T(s*R*.97,0,0), [R*.14,R*.22,R*.1]);
+  if (st.ears === "gato" || st.ears === "caballo") for (const s of [-1,1]) put(G.cone, skinM, hb, T(s*R*.6,R*.85,-R*.05), st.ears==="gato" ? [R*.28,R*.6,R*.18] : [R*.22,R*.55,R*.15], [0,0,-s*.35]);
+  if (st.ears === "oso") for (const s of [-1,1]){ put(G.sphere, skinM, hb, T(s*R*.72,R*.72,-R*.1), [R*.3,R*.3,R*.18]); put(G.sphere, M(lighter), hb, T(s*R*.72,R*.72,R*.02), [R*.17,R*.17,R*.06]); }
+  if (st.ears === "perro") for (const s of [-1,1]) put(G.sphere, earM, hb, T(s*R*.95,-R*.1,-R*.1), [R*.22,R*.6,R*.38], [0,0,s*.25]);
+  if (st.ears === "conejo") for (const s of [-1,1]) put(G.sphere, skinM, hb, T(s*R*.38,R*1.45,-R*.05), [R*.2,R*.75,R*.12], [0,0,-s*.12]);
+  if (st.ears === "elfo") for (const s of [-1,1]) put(G.cone, skinM, hb, T(s*R*1.05,R*.15,-R*.05), [R*.14,R*.55,R*.08], [0,0,-s*1.1]);
+  // pelo
+  const capGeo = new THREE.SphereGeometry(R*1.06, 28, 16, 0, Math.PI*2, 0, Math.PI*.46);
+  if (["corto","largo","coletas"].includes(st.hairStyle)){
+    const cap = put(capGeo, hairM, hb, T(0,R*.02,-R*.03), 1, [-.28,0,0]);
+    if (st.hairStyle === "largo") put(G.sphere, hairM, hb, T(0,-R*.55,-R*.5), [R*.95,R*1.35,R*.45]);
+    if (st.hairStyle === "coletas") for (const s of [-1,1]){ put(G.sphere, hairM, hb, T(s*R*1.1,-R*.25,-R*.25), [R*.33,R*.6,R*.33], [0,0,s*.3]); put(G.sphere, accM, hb, T(s*R*.98,R*.15,-R*.2), R*.11); }
+  }
+  if (st.hairStyle === "crin"){ put(capGeo, M(new THREE.Color().setHSL(.9,.8,.7)), hb, T(0,R*.02,-R*.03), 1, [-.28,0,0]);
+    for (let i=0;i<9;i++) put(G.sphere, M(new THREE.Color().setHSL(i/9,.95,.62)), hb, T(Math.sin(i)*R*.08, R*.95 - i*R*.3, -R*.62 - i*R*.1), R*(.32 - i*.012)); }
+  // accesorios de cabeza
+  const has = k => st.extras.includes(k);
+  if (has("cuerno")){ const h = put(G.cone, M("#ffd76b"), hb, T(0,R*1.25,R*.38), [R*.3,R*1.8,R*.3], [.35,0,0]);
+    for (let i=0;i<3;i++) put(new THREE.TorusGeometry(1,.12,6,16), M("#d9a830"), h, V(0,-.25+i*.22,0), .8-i*.2, [Math.PI/2,0,0]); }
+  if (has("cuernos")) for (const s of [-1,1]) put(G.cone, M(st.acc), hb, T(s*R*.5,R*.95,-R*.1), [R*.18,R*.8,R*.18], [-.35,0,-s*.4]);
+  if (has("antena")){ put(G.cyl, M("#555"), hb, T(0,R*1.15,0), [.008,R*.8,.008]); face.glow.push(put(G.sphere, B("#ff4d8d"), hb, T(0,R*1.6,0), R*.16)); }
+  if (has("corona")){ const c = new THREE.Group(); c.position.copy(T(0,R*.9,0)); hb.add(c);
+    put(new THREE.CylinderGeometry(R*.48,R*.52,R*.26,20,1,true), M("#ffcf33",{side:THREE.DoubleSide}), c, V(), 1);
+    for (let i=0;i<6;i++){ const a = i/6*Math.PI*2; put(G.cone, M("#ffcf33"), c, V(Math.sin(a)*R*.48,R*.25,Math.cos(a)*R*.48), [R*.1,R*.26,R*.1]); }
+    put(G.sphere, B("#ff4d8d"), c, V(0,0,R*.52), R*.08); }
+  if (has("casco")){ put(G.sphere, new THREE.MeshStandardMaterial({color:"#bfe6ff", transparent:true, opacity:.22, roughness:.05, depthWrite:false}), hb, T(0,0,0), R*1.42); put(new THREE.TorusGeometry(R*1.25,.025,10,32), M("#e8e8ee"), hb, T(0,-R*.9,0), 1, [Math.PI/2,0,0]); }
+  if (has("antifaz")) put(G.box, accM, hb, T(0,R*.12,R*.83), [R*1.6,R*.45,R*.2]);
+  if (has("gafas")) for (const s of [-1,1]) put(new THREE.TorusGeometry(R*.28,R*.05,8,20), M("#222"), hb, T(s*R*.38,R*.1,R*.95), 1);
+  if (has("bigotes")) for (const s of [-1,1]) for (const k of [-1,0,1]) put(G.cyl, M("#2a1d1d"), hb, T(s*R*.6,-R*.2+k*R*.08,R*.88), [.0025,R*.7,.0025], [0,0,Math.PI/2 + s*k*.15]);
+  // espalda (pegado al pecho) y cola (pegada a la cadera)
+  const cb = bones.chest, co = J.chest, hipB = bones.hips;
+  const C = (x,y,z) => V(x, y, z);  // relativo al hueso pecho
+  if (has("pinchos")) for (let i=0;i<4;i++) put(G.cone, accM, cb, C(0,.18-i*.1,-.13), [.03,.08,.03], [-Math.PI/2,0,0]);
+  if (has("mochila")) put(G.box, M(new THREE.Color(st.top).multiplyScalar(.75)), cb, C(0,.02,-.17), [.3,.36,.13]);
+  face.wings = [];
+  if (st.wings !== "no") for (const s of [-1,1]){
+    const piv = new THREE.Group(); piv.position.set(s*.06,.08,-.13); cb.add(piv);
+    if (st.wings === "dragon"){ const sh = new THREE.Shape(); sh.moveTo(0,0); sh.lineTo(.75,.45); sh.lineTo(.68,.1); sh.lineTo(.56,-.02); sh.lineTo(.44,.04); sh.lineTo(.3,-.15); sh.lineTo(0,-.1);
+      const m = put(new THREE.ShapeGeometry(sh), M(st.acc,{side:THREE.DoubleSide}), piv, V(), 1); m.scale.x = s; }
+    else if (st.wings === "hada"){ for (const [y,sx,sy,c] of [[.12,.32,.22,st.acc],[-.12,.22,.15,"#ffd1f0"]]){ const m = put(new THREE.CircleGeometry(1,32), M(c,{side:THREE.DoubleSide,transparent:true,opacity:.75}), piv, V(s*sx*.9,y,0), [sx,sy,1]); m.rotation.z = s*(y>0?.45:-.4); } }
+    else for (let i=0;i<5;i++) put(G.sphere, M("#ffffff"), piv, V(s*(.12+i*.1),.1+i*.06,0), [.2,.06,.02], [0,0,s*(.55+i*.06)]);
+    face.wings.push({piv, s});
+  }
+  if (st.cape){ const g = new THREE.PlaneGeometry(.5, 1.05, 1, 6); g.translate(0,-.52,0); face.cape = put(g, M(st.acc,{side:THREE.DoubleSide}), cb, C(0,.2,-.15), 1); }
+  face.tail = [];
+  if (st.tail !== "no"){ for (let i=0;i<10;i++){ const c = st.tail==="arcoiris" ? new THREE.Color().setHSL(i/10,.95,.62) : (st.tail==="dragon"&&i===9 ? new THREE.Color(st.acc) : new THREE.Color(st.tail==="perro"?st.hair:st.skin));
+    const r = st.tail==="dragon" ? .07-i*.005 : st.tail==="arcoiris" ? .05 : .045-i*.002; const m = put(G.sphere, M(c), hipB, V(), Math.max(.02,r)); face.tail.push(m); } face.tailType = st.tail; }
+  const root = new THREE.Group(); root.add(body);
+  body.scale.setScalar(st.height);
+  face.sparkles = [];
+  if (st.sparkles){ const R2 = rng(5); for (let i=0;i<16;i++){ const m = new THREE.Mesh(G.octa, B(new THREE.Color().setHSL(i/16,.9,.65))); m.userData = {a:R2()*7, d:.55+R2()*.5, y:.3+R2()*1.5, sp:(R2()>.5?1:-1)*(.3+R2()*.5)}; root.add(m); face.sparkles.push(m); } }
+  root.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return {root, bones, face};
+}
+
+function useCharacter(st){
+  const {root, bones, face} = buildCharacter(st);
+  unloadModel();
+  scene.add(root);
+  return registerModel(root, bones, {label: st.name, face, quiet: true});
+}
+
+function updateFace(M, head, t){
+  const f = M.face; if (!f) return;
+  const bl = [head.blinkA, head.blinkB, (head.blinkA+head.blinkB)/2];
+  f.eyes.forEach((e,i) => e.scale.y = Math.max(.08, 1 - bl[i]));
+  const open = Math.min(1, head.jaw);
+  f.mouthOpen.visible = open > .08; f.smile.visible = !f.mouthOpen.visible;
+  f.mouthOpen.scale.set(.035 + open*.015, .006 + open*.035, .02);
+  f.smile.scale.set(1 + head.smile*.4, 1 + head.smile*.6, 1);
+  for (const g of f.glow) g.material.color.setHSL((t/5 % 360)/360, .95, .6);
+  const flap = Math.sin(t/260)*.35;
+  for (const w of f.wings) w.piv.rotation.y = w.s * (.35 + flap);
+  if (f.cape) f.cape.rotation.x = -.18 - Math.abs(Math.sin(t/500))*.12;
+  if (f.tail.length){ const wag = Math.sin(t/(f.tailType==="perro"?120:420))*.35;
+    f.tail.forEach((m,i) => { const k = i/(f.tail.length-1); const y = f.tailType==="perro" ? .05 + k*.25 : f.tailType==="gato" ? Math.sin(k*2.6)*.3 - .05 : -.05 - k*.18 + Math.sin(k*3)*.08;
+      m.position.set(Math.sin(k*1.6)*wag*.6, y, -.12 - k*(f.tailType==="arcoiris"?.38:.45)); }); }
+  const hips = M.bones.hips.getWorldPosition(_v1);
+  f.sparkles.forEach((m,i) => { const u = m.userData, a = u.a + t/1000*u.sp; m.position.set(hips.x - M.root.position.x + Math.cos(a)*u.d, u.y + Math.sin(t/400+i)*.05, Math.sin(a)*u.d); m.rotation.y = t/300; m.scale.setScalar(.018 + .012*Math.abs(Math.sin(t/300+i))); });
+}
+
+/* ---------- Biblioteca ---------- */
+const LIB_KEY = "avatar3d_personajes";
+function libLoad(){ try { return JSON.parse(localStorage.getItem(LIB_KEY) || "[]"); } catch(e){ return []; } }
+function libSave(list){ try { localStorage.setItem(LIB_KEY, JSON.stringify(list)); return true; } catch(e){ msg("No se pudo guardar en este navegador", 3000); return false; } }
+function libActive(id){ try { if (id === undefined) return localStorage.getItem(LIB_KEY+"_activo"); if (id) localStorage.setItem(LIB_KEY+"_activo", id); else localStorage.removeItem(LIB_KEY+"_activo"); } catch(e){} }
+
+/* ---------- Interfaz del editor ---------- */
+const ED = {st:null, id:null, prev:null};
+function renderEditorForm(){
+  const box = $("edForm"); box.innerHTML = "";
+  for (const [title, items] of EDIT_SCHEMA){
+    const sec = document.createElement("div"); sec.className = "sec"; sec.innerHTML = `<h3>${title}</h3>`;
+    for (const [k, label, type, a, b, c] of items){
+      const row = document.createElement("label"); row.className = "edrow";
+      if (type === "range"){ row.innerHTML = `<span>${label}</span><input type="range" min="${a}" max="${b}" step="${c}">`; const i = row.querySelector("input"); i.value = ED.st[k]; i.oninput = () => { ED.st[k] = +i.value; edRebuild(); }; }
+      else if (type === "color"){ row.innerHTML = `<span>${label}</span><input type="color">`; const i = row.querySelector("input"); i.value = ED.st[k]; i.oninput = () => { ED.st[k] = i.value; edRebuild(); }; }
+      else if (type === "select"){ row.innerHTML = `<span>${label}</span><select></select>`; const s = row.querySelector("select"); for (const [v,n] of a) s.add(new Option(n, v)); s.value = ED.st[k]; s.onchange = () => { ED.st[k] = s.value; edRebuild(); }; }
+      else if (type === "check"){ row.className = "edrow tog"; row.innerHTML = `<span>${label}</span><input type="checkbox">`; const i = row.querySelector("input"); i.checked = !!ED.st[k]; i.onchange = () => { ED.st[k] = i.checked; edRebuild(); }; }
+      else if (type === "multi"){ row.className = "edrow"; row.innerHTML = `<span>${label}</span><div class="chips"></div>`; const d = row.querySelector("div");
+        for (const [v,n] of a){ const ch = document.createElement("button"); ch.type = "button"; ch.className = "chip" + (ED.st.extras.includes(v) ? " on" : ""); ch.textContent = n;
+          ch.onclick = e => { e.preventDefault(); const L = ED.st.extras; const j = L.indexOf(v); if (j >= 0) L.splice(j,1); else L.push(v); ch.classList.toggle("on"); edRebuild(); }; d.appendChild(ch); } }
+      sec.appendChild(row);
+    }
+    box.appendChild(sec);
+  }
+  $("edName").value = ED.st.name;
+}
+let edTimer = 0;
+function edRebuild(){ clearTimeout(edTimer); edTimer = setTimeout(() => useCharacter(ED.st), 60); }
+function openEditor(st, id){
+  ED.st = JSON.parse(JSON.stringify(st || {...CH_DEF, extras:[]})); ED.id = id || null;
+  ED.prev = MODEL ? {label: MODEL.label} : null;
+  S.editing = true; document.body.classList.add("editing");
+  $("start").style.display = "none"; openSheet(false);
+  renderEditorForm(); useCharacter(ED.st);
+  autoRotate = true; $("spin").checked = true; setView("frontal");
+  ensureLoop();
+}
+function closeEditor(){
+  S.editing = false; document.body.classList.remove("editing");
+  autoRotate = false; $("spin").checked = false; setView("frontal");
+  if (!S.camOn) $("start").style.display = "";
+  renderLibrary();
+}
+function renderLibrary(){
+  const list = libLoad(), act = libActive();
+  for (const boxId of ["libList","libList0"]){
+    const box = $(boxId); if (!box) continue; box.innerHTML = "";
+    if (!list.length){ box.innerHTML = `<span style="font-size:13px;color:var(--mut)">Aún no hay personajes guardados.</span>`; continue; }
+    for (const ch of list){
+      const row = document.createElement("div"); row.className = "librow" + (ch.id === act ? " act" : "");
+      row.innerHTML = `<b>${ch.st.name.replace(/</g,"&lt;")}</b><button class="btn sm">Usar</button><button class="btn sm">Editar</button><button class="btn sm">🗑</button>`;
+      const [bU, bE, bD] = row.querySelectorAll("button");
+      bU.onclick = () => { libActive(ch.id); useCharacter(ch.st); msg("Personaje: " + ch.st.name); openSheet(false); renderLibrary(); };
+      bE.onclick = () => openEditor(ch.st, ch.id);
+      bD.onclick = () => { $("confirmTxt").textContent = `¿Borrar «${ch.st.name}»? No se puede deshacer.`; $("confirm").style.display = "flex";
+        $("confirmYes").onclick = () => { libSave(libLoad().filter(x => x.id !== ch.id)); if (libActive() === ch.id){ libActive(null); } $("confirm").style.display = "none"; renderLibrary(); }; };
+      box.appendChild(row);
+    }
+  }
+}
+$("confirmNo").onclick = () => $("confirm").style.display = "none";
+$("edName").oninput = e => ED.st.name = e.target.value || "Mi personaje";
+$("edFromPrompt").onclick = () => { const t = $("edPrompt").value.trim(); if (!t) return; ED.st = settingsFromPrompt(t); renderEditorForm(); useCharacter(ED.st); };
+$("edPrompt").addEventListener("keydown", e => { if (e.key === "Enter") $("edFromPrompt").click(); });
+$("edSave").onclick = () => { const list = libLoad(); const id = ED.id || ("p" + Date.now().toString(36));
+  const item = {id, st: JSON.parse(JSON.stringify(ED.st))}; const i = list.findIndex(x => x.id === id); if (i >= 0) list[i] = item; else list.push(item);
+  if (libSave(list)){ ED.id = id; libActive(id); msg("Guardado en Mis personajes: " + ED.st.name, 2500); renderLibrary(); } };
+$("edUse").onclick = () => { $("edSave").click(); closeEditor(); msg("Usando: " + ED.st.name, 2500); };
+$("edClose").onclick = () => { const act = libLoad().find(x => x.id === libActive()); if (act) useCharacter(act.st); else unloadModel(); closeEditor(); };
+$("edExport").onclick = () => {
+  const {root} = buildCharacter(ED.st);
+  new GLTFExporter().parse(root, res => {
+    const blob = new Blob([res], {type:"model/gltf-binary"}), a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = (ED.st.name || "personaje").replace(/[^\wáéíóúñ -]/gi,"").trim().replace(/\s+/g,"-") + ".glb";
+    document.body.appendChild(a); a.click(); a.remove(); msg("Personaje exportado (.glb)", 2500);
+  }, err => { console.error(err); msg("No se pudo exportar", 3000); }, {binary:true});
+};
+for (const id of ["edNew","edNew0"]) $(id).onclick = () => openEditor(null, null);
+
+
+renderLibrary();
 /* ---------------- Grabación ---------------- */
 let rec, chunks = [], recBlob, recExt;
 $("bRec").onclick = () => {
