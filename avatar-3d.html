@@ -1029,8 +1029,10 @@ function loop(now){
   if (S.autoframe !== false) controls.target.x = lerp(controls.target.x, 0, .1);
   controls.update();
   renderer.render(scene, camera);
-  if (S.editing){ const W = innerWidth, H = innerHeight; if (W > 820) camera.setViewOffset(W, H, W*.2, 0, W, H); else camera.setViewOffset(W, H, 0, H*.24, W, H); }
-  else if (camera.view && camera.view.enabled) camera.clearViewOffset();
+  if (S.editing){ const W = innerWidth, H = innerHeight;
+    if (W > 820){ camera.zoom = 1; camera.setViewOffset(W, H, W*.2, 0, W, H); }
+    else { camera.zoom = .78; camera.setViewOffset(W, H, 0, H*.26, W, H); } }
+  else if (camera.view && camera.view.enabled){ camera.zoom = 1; camera.clearViewOffset(); }
   if (rig.idle && !S.editing && !$("msg").dataset.idle){ $("msg").dataset.idle = 1; msg("Ponte delante de la cámara 👋", 0); }
   if ((!rig.idle || S.editing) && $("msg").dataset.idle){ delete $("msg").dataset.idle; $("msg").style.display="none"; }
   fpsN++; if (now - fpsT > 1000){ $("fps").textContent = S.showFps ? `${fpsN} fps` : ""; $("fps").style.display = S.showFps?"block":"none"; fpsN = 0; fpsT = now; }
