@@ -1023,7 +1023,7 @@ function loop(now){
   const rig = buildRig(now, !!S.editing);
   const dt = Math.min(.1, (now - (lastNow||now))/1000); lastNow = now;
   if (AV) AV.root.visible = !MODEL;
-  if (MODEL) { try { poseModel(rig, now, dt); } catch(e){ console.warn(e); } } else poseAvatar(rig, now);
+  if (MODEL) { try { poseModel(rig, now, dt); } catch(e){ console.warn(e); } } else if (AV) { try { poseAvatar(rig, now); } catch(e){ console.warn(e); } }
   if (S.skel) drawSkeleton(rig.p); else if (skelLines) skelLines.visible = false;
   controls.autoRotate = autoRotate; controls.autoRotateSpeed = 1.5;
   if (S.autoframe !== false) controls.target.x = lerp(controls.target.x, 0, .1);
@@ -1635,6 +1635,7 @@ $("dShare").onclick = async () => { try{ await navigator.share({files:[new File(
 $("dSave").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(recBlob); a.download = fileName(); document.body.appendChild(a); a.click(); a.remove(); };
 $("dClose").onclick = () => $("dlg").style.display = "none";
 
+S.cfg = parsePrompt($("prompt").value);
 if (!window.isSecureContext) status("⚠️ Abierta sin https://: la cámara no funcionará. Súbela a un sitio con https.");
 </script>
 </body>
