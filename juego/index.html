@@ -45,6 +45,7 @@
   #title{position:fixed;z-index:10;left:calc(env(safe-area-inset-left) + 14px);top:calc(env(safe-area-inset-top) + 12px);background:rgba(10,20,30,.7);padding:8px 16px;border-radius:14px;font-size:20px;font-weight:700}
   #instr{position:fixed;z-index:10;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 12px);max-width:60vw;text-align:center;background:rgba(10,20,30,.78);padding:10px 26px;border-radius:18px;font-size:clamp(24px,3.4vw,40px);font-weight:800;text-shadow:0 2px 4px rgba(0,0,0,.5)}
   #score{position:fixed;z-index:10;right:calc(env(safe-area-inset-right) + 14px);top:calc(env(safe-area-inset-top) + 12px);background:rgba(10,20,30,.78);padding:8px 20px;border-radius:18px;font-size:clamp(26px,3.4vw,42px);font-weight:900;color:#ffd84a}
+  @media (max-width:900px){ #title{display:none} #instr{max-width:64vw;left:14px;transform:none;text-align:left} }
   #score.pop{animation:pop .45s ease}
   @keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}
   #bar{position:fixed;z-index:10;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 14px);display:flex;gap:10px;padding:8px;border-radius:22px;background:rgba(10,20,30,.7);border:1px solid rgba(255,255,255,.1)}
@@ -95,6 +96,10 @@
       <div><label class="l">Cámara</label><select id="sCam"><option value="">Automática</option></select></div>
       <div><label class="l">Precisión del movimiento</label>
         <select id="sQ"><option value="lite">Normal (más fluido)</option><option value="full">Alta (ordenador potente)</option></select></div>
+    </div>
+    <div class="row">
+      <div><label class="l">Voz que guía (en Edge suenan más naturales)</label><select id="sVoz"><option value="">Automática (la más natural)</option></select></div>
+      <div style="display:flex;align-items:flex-end"><button class="btn" id="bVoz" style="width:100%">🔊 Probar la voz</button></div>
     </div>
     <div class="togs">
       <label class="tog"><span>Jugar sentado (solo brazos)</span><input type="checkbox" id="tSeated"></label>
@@ -156,7 +161,7 @@ const SAMPLE_VRM = "https://cdn.jsdelivr.net/gh/pixiv/three-vrm@dev/packages/thr
 const AVATARS = { chico:{name:"Chico", url:CHICO_URL}, chica:{name:"Chica", url:SAMPLE_VRM} };
 
 /* ---------------- Ajustes ---------------- */
-const DEF = {avatar:"chica", scene:0, diff:"tranquilo", goal:10, camId:"", quality:"lite", seated:false, lateral:false, voice:true, sound:true, pip:true, help:true, mirror:true};
+const DEF = {avatar:"chica", scene:0, diff:"tranquilo", goal:10, camId:"", quality:"lite", seated:false, lateral:false, voice:true, voz:"", sound:true, pip:true, help:true, mirror:true};
 const S = {...DEF};
 try { Object.assign(S, JSON.parse(localStorage.getItem("avatarJuego") || "{}")); } catch(e){}
 const savePrefs = () => { try { localStorage.setItem("avatarJuego", JSON.stringify(S)); } catch(e){} };
@@ -278,16 +283,28 @@ function beep(name){
   }
 }
 let esVoice = null;
+// Elige la voz española más natural del aparato (Edge: voces «Natural» de Microsoft; Chrome: Google; iPhone/Mac: Mónica, Paulina…)
+function voiceScore(v){ const n = v.name.toLowerCase(); let s = 0;
+  if (/natural|neural/.test(n)) s += 100; if (/online/.test(n)) s += 40; if (/premium|enhanced|mejorad/.test(n)) s += 60;
+  if (/google/.test(n)) s += 50; if (/m[oó]nica|paulina|marisol|elvira|ximena|dalia|[aá]lvaro|jorge|luc[ií]a/.test(n)) s += 25;
+  if (/^es(-|_)es/i.test(v.lang)) s += 15; else if (/^es(-|_)(mx|us)/i.test(v.lang)) s += 5; return s; }
+function esVoices(){ try { return speechSynthesis.getVoices().filter(v => /^es/i.test(v.lang)).sort((a,b) => voiceScore(b) - voiceScore(a)); } catch(e){ return []; } }
+function fillVoices(){ const sel = $("sVoz"); if (!sel) return; const vs = esVoices(); sel.innerHTML = "";
+  sel.add(new Option(vs.length ? "Automática (la más natural)" : "Voz del sistema", ""));
+  for (const v of vs) sel.add(new Option(`${v.name} (${v.lang})`, v.name));
+  sel.value = vs.some(v => v.name === S.voz) ? S.voz : ""; esVoice = null; }
+try { speechSynthesis.addEventListener("voiceschanged", fillVoices); } catch(e){}
 function say(text, force){
   if (!S.voice || !window.speechSynthesis) return;
   try {
-    if (!esVoice){ const vs = speechSynthesis.getVoices(); esVoice = vs.find(v => /^es(-|_)ES/i.test(v.lang)) || vs.find(v => /^es/i.test(v.lang)) || null; }
+    if (!esVoice){ const vs = esVoices(); esVoice = vs.find(v => v.name === S.voz) || vs[0] || null; }
     if (force !== false) speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text); u.lang = "es-ES"; if (esVoice) u.voice = esVoice; u.rate = .92; u.pitch = 1.05;
+    const u = new SpeechSynthesisUtterance(text); u.lang = esVoice?.lang || "es-ES"; if (esVoice) u.voice = esVoice;
+    u.rate = /natural|neural|google/i.test(esVoice?.name || "") ? 1 : .95; u.pitch = 1;
     speechSynthesis.speak(u);
   } catch(e){}
 }
-const PRAISE = ["¡Muy bien!","¡Genial!","¡Estupendo!","¡Así se hace!","¡Fenomenal!","¡Bravo!"];
+const PRAISE = ["¡Muy bien!","¡Genial!","¡Eso es!","¡Estupendo!","¡Así se hace!","¡Perfecto!","¡Qué bien lo haces!"];
 let lastPraise = 0;
 
 /* ---------------- IA de movimiento (MediaPipe) ---------------- */
@@ -724,19 +741,24 @@ const SCENE3 = pickerScene({
 
 // Escena 4: coger el objeto encendido y meterlo en la caja
 const SCENE4 = {
-  n:4, title:"A la caja", icon:"📦", instr:"", say:"Escena cuatro. Coge el objeto que se ilumina y mételo en la caja verde.",
+  n:4, title:"A la caja", icon:"📦", instr:"", say:"Escena cuatro. Coge el objeto que se ilumina y mételo en la caja. La caja está abajo: tendrás que agacharte.",
   DEFS:[{n:"la pelota", a:"la", f:makeBall}, {n:"la taza", a:"la", f:makeCup}, {n:"el regalo", a:"lo", f:makeGift}],
   build(g, t){
     this.g = g; addRoom(g, "#cfe6d8", 0xa8784c);
     const D = DIFF[S.diff], kk = (D.k[0] + D.k[1])/2;
-    const homes = [reachAt(-1, 30, kk), V(0, (MODEL?.reach.shY || 1.33) + (MODEL?.reach.arm || .55)*kk*.95, .15), reachAt(1, 30, kk)];
+    // objetos bien separados: uno a cada lado, con el brazo estirado, y otro arriba en el centro
+    const kf = D.k[1] + .05, R = MODEL?.reach || {shY:1.33, arm:.55};
+    const homes = [reachAt(-1, 12, kf), V(0, R.shY + R.arm*kf, .15), reachAt(1, 12, kf)];
     this.objs = this.DEFS.map((d, i) => { const o = d.f(); o.position.copy(homes[i]); g.add(o);
       const tray = makeTray(); tray.position.copy(homes[i]).add(V(0, -.1, 0)); g.add(tray);
       return {d, obj:o, home:homes[i], i}; });
-    this.box = makeBox(); this.boxSide = 1; this.box.position.copy(this.boxPos(1)); g.add(this.box);
+    // la caja queda fija, delante y abajo: hay que agacharse para meter el objeto
+    this.box = makeBox(); this.box.position.copy(this.boxPos()); g.add(this.box);
+    const sh = mesh(new THREE.CircleGeometry(.24, 24), new THREE.MeshBasicMaterial({color:0x000000, transparent:true, opacity:.25, depthWrite:false}), g, false);
+    sh.rotation.x = -Math.PI/2; sh.position.set(this.box.position.x, .005, this.box.position.z);
     this.state = "wait"; this.next = t + 1500; this.cur = null; this.active = false;
   },
-  boxPos(side){ const D = DIFF[S.diff]; return reachAt(side, -48, (D.k[0] + D.k[1])/2 + .05); },
+  boxPos(){ return V(0, {tranquilo:.55, normal:.45, agil:.35}[S.diff] || .5, .38); },
   update(dt, t){
     const D = DIFF[S.diff], bu = this.box.userData;
     // la caja: siempre visible; cuando llevas un objeto, brilla, parpadea y aparece la flecha
@@ -749,8 +771,6 @@ const SCENE4 = {
     const c = this.cur;
     if (this.state === "wait" && t > this.next){
       const av = this.objs.filter(o => o !== this.last); this.cur = pick(av);
-      const side = this.cur.i === 0 ? -1 : this.cur.i === 2 ? 1 : (Math.random() < .5 ? -1 : 1);
-      if (side !== this.boxSide){ this.boxSide = side; flyTo(this.box, this.boxPos(side), .7, .15); }
       setLit(this.cur.obj, true); beep("appear"); this.state = "lit"; this.litT = t;
       instr(`Coge ${this.cur.d.n}`); say(`Coge ${this.cur.d.n}.`);
     }
@@ -759,7 +779,7 @@ const SCENE4 = {
       if (touchedBy(c.obj.position, .1) >= 0){
         const hi = touchedBy(c.obj.position, .1); this.hold = HANDS[hi].id; this.lostT = t;
         setLit(c.obj, false); c.obj.scale.setScalar(1.1); this.state = "carry"; this.active = true; beep("grab");
-        instr(`Llév${c.d.a} a la caja ➜`); say(`Muy bien. Ahora mét${c.d.a === "la" ? "ela" : "elo"} en la caja.`);
+        instr(`Agáchate y mét${c.d.a === "la" ? "ela" : "elo"} en la caja ⬇`); say(`Muy bien. Ahora agáchate y mét${c.d.a === "la" ? "ela" : "elo"} en la caja.`);
       }
     }
     else if (this.state === "carry"){
@@ -768,8 +788,8 @@ const SCENE4 = {
       else if (t - this.lostT > 1600){ // se perdió la mano: el objeto vuelve a su sitio
         this.active = false; this.state = "lit"; flyTo(c.obj, c.home, .6, .1); setLit(c.obj, true); instr(`Coge ${c.d.n}`); beep("lost"); return;
       }
-      const top = this.box.position.clone().add(V(0, .1, 0));
-      if (Math.hypot(c.obj.position.x - top.x, c.obj.position.y - top.y) < .2 + D.hit*.6){
+      const top = this.box.position.clone().add(V(0, .12, 0));
+      if (Math.abs(c.obj.position.x - top.x) < .2 + D.hit*.5 && c.obj.position.y < top.y + .08 + D.hit*.4){
         this.active = false; this.state = "drop"; beep("drop");
         flyTo(c.obj, this.box.position.clone().add(V(0, 0, .02)), .4, .12, () => {
           c.obj.visible = false; burst(this.box.position.clone().add(V(0,.2,.1)), [0x4dff7a,0xffd84a,0xffffff], 30);
@@ -803,12 +823,12 @@ function hit(pos, colors){
   if (G.score >= S.goal) sceneDone();
 }
 function startScene(n){
-  clearTimeout(G.timer); clearWorld(); setLit && null;
+  clearTimeout(G.timer); clearWorld();
   G.scene = n; G.score = 0; G.state = "intro"; G.paused = false; $("bPause").textContent = "⏸";
   SC = SCENES[n]; SC.build(world, G.t);
   $("title").textContent = `${SC.icon} Escena ${n} · ${SC.title}`; instr(SC.instr); updateScore();
   $("hud").classList.add("on"); updatePip();
-  card(`${SC.icon} ${SC.title}`, SC.n === 4 ? "Coge el objeto que brilla y mételo en la caja verde" : SC.instr);
+  card(`${SC.icon} ${SC.title}`, SC.n === 4 ? "Coge el objeto que brilla y agáchate para meterlo en la caja" : SC.instr);
   say(SC.say);
   G.timer = setTimeout(() => { if (G.state === "intro"){ card(""); G.state = "play"; } }, 3800);
 }
@@ -876,11 +896,13 @@ $("sDiff").onchange = e => { S.diff = e.target.value; savePrefs(); };
 $("sGoal").onchange = e => { S.goal = +e.target.value; savePrefs(); };
 $("sQ").onchange = e => { S.quality = e.target.value; savePrefs(); resize(); };
 $("sCam").onchange = e => { S.camId = e.target.value; savePrefs(); };
+$("sVoz").onchange = e => { S.voz = e.target.value; esVoice = null; savePrefs(); unlockAudio(); const v = S.voice; S.voice = true; say("Hola. Así sueno. ¿Jugamos un rato?"); S.voice = v; };
+$("bVoz").onclick = () => { unlockAudio(); const v = S.voice; S.voice = true; esVoice = null; say("Hola. Así sueno. ¿Jugamos un rato?"); S.voice = v; };
 for (const [id, k] of [["tSeated","seated"],["tLateral","lateral"],["tVoice","voice"],["tSound","sound"],["tPip","pip"],["tHelp","help"],["tMirror","mirror"]])
   $(id).onchange = e => { S[k] = e.target.checked; savePrefs(); updatePip(); if (k === "mirror"){ delete sm.pose; delete sm.poseImg; } };
 $("go").onclick = () => start(false);
 $("goTest").onclick = () => start(true);
-syncMenu(); listCams();
+syncMenu(); listCams(); fillVoices();
 
 /* ---------------- Botones del juego y teclado ---------------- */
 $("bPause").onclick = togglePause; $("bNext").onclick = nextScene; $("bMenu").onclick = toMenu;
