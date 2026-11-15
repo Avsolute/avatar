@@ -1065,8 +1065,8 @@ $("go").onclick = async () => {
   }catch(e){ console.error(e); status("❌ " + (e.name==="NotAllowedError" ? "Permiso denegado. Actívalo en los ajustes del navegador." : (e.message||e))); $("go").disabled=false; return; }
   savePrefs(); resize(); keepAwake();
   $("start").style.display = "none"; S.camOn = true; ensureLoop();
-  if (pendingModel) loadModel(pendingModel, pendingModel.name);
-  else if (!MODEL){ const act = libLoad().find(x => x.id === libActive()); if (act) useCharacter(act.st); }
+  if (pendingModel){ const f = pendingModel; loadModel(f, prettyName(f.name)).then(ok => ok && saveLocalModel(f)); }
+  else if (!MODEL) startActiveCharacter();
   msg("Toca ⚙️ para cambiar avatar, fondo o voz", 3500);
 };
 
@@ -1111,9 +1111,9 @@ let pendingModel = null;
 $("modelPick0").onclick = () => $("modelFile0").click();
 $("modelFile0").onchange = e => { pendingModel = e.target.files[0] || null; $("modelName0").textContent = pendingModel ? "Personaje: " + pendingModel.name : ""; };
 $("modelPick").onclick = () => $("modelFile").click();
-$("modelFile").onchange = async e => { const f = e.target.files[0]; if (!f) return; openSheet(false); await loadModel(f, f.name); e.target.value = ""; };
-$("modelSample").onclick = async () => { openSheet(false); await loadModel(SAMPLE_VRM, "personaje de ejemplo (pixiv)"); };
-$("modelOff").onclick = () => { unloadModel(); openSheet(false); msg("Muñeco 3D"); };
+$("modelFile").onchange = async e => { const f = e.target.files[0]; if (!f) return; openSheet(false); if (await loadModel(f, prettyName(f.name))) await saveLocalModel(f); e.target.value = ""; };
+$("modelSample").onclick = () => useBuiltin("builtin:ejemplo");
+$("modelOff").onclick = () => useBuiltin("builtin:muneco");
 
 /* =========================================================
    Editor de personajes: malla continua con esqueleto propio
@@ -1121,10 +1121,10 @@ $("modelOff").onclick = () => { unloadModel(); openSheet(false); msg("Muñeco 3D
 const CH_DEF = {name:"Mi personaje", height:1, build:1, head:1,
   skin:"#ffd7b8", top:"#ff5fa8", bottom:"#3a4a8f", shoes:"#ffffff", hair:"#5a3a22", acc:"#ffcf33",
   pattern:"liso", sleeves:"corta", legs:"largo", eyes:"redondos", mouth:"sonrisa", nose:"boton", cheeks:true,
-  ears:"humanas", hairStyle:"corto", extras:[], wings:"no", tail:"no", cape:false, sparkles:false};
+  ears:"humanas", hairStyle:"corto", extras:[], wings:"no", tail:"no", cape:false, sparkles:false, base:"propio", recolor:false};
 
-function settingsFromPrompt(text){
-  const c = parsePrompt(text), s = {...CH_DEF, extras:[]};
+function settingsFromPrompt(text, base){
+  const c = parsePrompt(text), s = {...CH_DEF, extras:[], base: base || "propio"};
   s.name = text.replace(/^quiero ser (un|una)?\s*/i,"").replace(/^(un|una)\s+/i,"").slice(0,40) || "Mi personaje";
   const ex = c.ex, add = (...k) => k.forEach(x => !s.extras.includes(x) && s.extras.push(x));
   const T = {
@@ -1153,6 +1153,9 @@ function settingsFromPrompt(text){
   if (ex.has("brillos")) s.sparkles = true;
   for (const k of ["cuerno","cuernos","corona","antena","casco","antifaz","gafas","bigotes"]) if (ex.has(k)) add(k);
   if (/sin alas/.test(norm(text))) s.wings = "no";
+  s.recolor = c.type !== "muneco" || cols.length > 0 || c.rainbow;
+  if (s.base !== "propio" && c.type === "muneco" && !ex.size) s.ears = "ninguna";
+  if (s.base !== "propio" && ["humanas"].includes(s.ears)) s.ears = "ninguna";
   return s;
 }
 
@@ -1285,14 +1288,8 @@ function buildCharacter(st){
   face.smile = put(new THREE.TorusGeometry(.03*hs,.006*hs,8,20,Math.PI), M(st.eyes==="robot"?st.acc:"#3a1a2a"), hb, T(0,my+R*.08,mz+.005), 1, [0,0,Math.PI]);
   if (st.mouth === "dientes") for (const s of [-1,1]) put(G.cone, whiteM, hb, T(s*.022*hs,my+R*.02,mz+.01), [.008,.022,.008], [Math.PI,0,0]);
   if (st.cheeks) for (const s of [-1,1]) put(G.sphere, B("#ff8fb0",{transparent:true,opacity:.6}), hb, T(s*R*.65,-R*.2,R*.78), [R*.17,R*.1,R*.06]);
-  // orejas
-  const earM = st.ears === "perro" ? hairM : skinM;
+  // orejas humanas, pelo y detalles de la cara (solo personaje propio)
   if (st.ears === "humanas") for (const s of [-1,1]) put(G.sphere, skinM, hb, T(s*R*.97,0,0), [R*.14,R*.22,R*.1]);
-  if (st.ears === "gato" || st.ears === "caballo") for (const s of [-1,1]) put(G.cone, skinM, hb, T(s*R*.6,R*.85,-R*.05), st.ears==="gato" ? [R*.28,R*.6,R*.18] : [R*.22,R*.55,R*.15], [0,0,-s*.35]);
-  if (st.ears === "oso") for (const s of [-1,1]){ put(G.sphere, skinM, hb, T(s*R*.72,R*.72,-R*.1), [R*.3,R*.3,R*.18]); put(G.sphere, M(lighter), hb, T(s*R*.72,R*.72,R*.02), [R*.17,R*.17,R*.06]); }
-  if (st.ears === "perro") for (const s of [-1,1]) put(G.sphere, earM, hb, T(s*R*.95,-R*.1,-R*.1), [R*.22,R*.6,R*.38], [0,0,s*.25]);
-  if (st.ears === "conejo") for (const s of [-1,1]) put(G.sphere, skinM, hb, T(s*R*.38,R*1.45,-R*.05), [R*.2,R*.75,R*.12], [0,0,-s*.12]);
-  if (st.ears === "elfo") for (const s of [-1,1]) put(G.cone, skinM, hb, T(s*R*1.05,R*.15,-R*.05), [R*.14,R*.55,R*.08], [0,0,-s*1.1]);
   // pelo
   const capGeo = new THREE.SphereGeometry(R*1.06, 28, 16, 0, Math.PI*2, 0, Math.PI*.46);
   if (["corto","largo","coletas"].includes(st.hairStyle)){
@@ -1302,47 +1299,140 @@ function buildCharacter(st){
   }
   if (st.hairStyle === "crin"){ put(capGeo, M(new THREE.Color().setHSL(.9,.8,.7)), hb, T(0,R*.02,-R*.03), 1, [-.28,0,0]);
     for (let i=0;i<9;i++) put(G.sphere, M(new THREE.Color().setHSL(i/9,.95,.62)), hb, T(Math.sin(i)*R*.08, R*.95 - i*R*.3, -R*.62 - i*R*.1), R*(.32 - i*.012)); }
-  // accesorios de cabeza
   const has = k => st.extras.includes(k);
-  if (has("cuerno")){ const h = put(G.cone, M("#ffd76b"), hb, T(0,R*1.25,R*.38), [R*.3,R*1.8,R*.3], [.35,0,0]);
-    for (let i=0;i<3;i++) put(new THREE.TorusGeometry(1,.12,6,16), M("#d9a830"), h, V(0,-.25+i*.22,0), .8-i*.2, [Math.PI/2,0,0]); }
-  if (has("cuernos")) for (const s of [-1,1]) put(G.cone, M(st.acc), hb, T(s*R*.5,R*.95,-R*.1), [R*.18,R*.8,R*.18], [-.35,0,-s*.4]);
-  if (has("antena")){ put(G.cyl, M("#555"), hb, T(0,R*1.15,0), [.008,R*.8,.008]); face.glow.push(put(G.sphere, B("#ff4d8d"), hb, T(0,R*1.6,0), R*.16)); }
-  if (has("corona")){ const c = new THREE.Group(); c.position.copy(T(0,R*.9,0)); hb.add(c);
-    put(new THREE.CylinderGeometry(R*.48,R*.52,R*.26,20,1,true), M("#ffcf33",{side:THREE.DoubleSide}), c, V(), 1);
-    for (let i=0;i<6;i++){ const a = i/6*Math.PI*2; put(G.cone, M("#ffcf33"), c, V(Math.sin(a)*R*.48,R*.25,Math.cos(a)*R*.48), [R*.1,R*.26,R*.1]); }
-    put(G.sphere, B("#ff4d8d"), c, V(0,0,R*.52), R*.08); }
-  if (has("casco")){ put(G.sphere, new THREE.MeshStandardMaterial({color:"#bfe6ff", transparent:true, opacity:.22, roughness:.05, depthWrite:false}), hb, T(0,0,0), R*1.42); put(new THREE.TorusGeometry(R*1.25,.025,10,32), M("#e8e8ee"), hb, T(0,-R*.9,0), 1, [Math.PI/2,0,0]); }
   if (has("antifaz")) put(G.box, accM, hb, T(0,R*.12,R*.83), [R*1.6,R*.45,R*.2]);
   if (has("gafas")) for (const s of [-1,1]) put(new THREE.TorusGeometry(R*.28,R*.05,8,20), M("#222"), hb, T(s*R*.38,R*.1,R*.95), 1);
   if (has("bigotes")) for (const s of [-1,1]) for (const k of [-1,0,1]) put(G.cyl, M("#2a1d1d"), hb, T(s*R*.6,-R*.2+k*R*.08,R*.88), [.0025,R*.7,.0025], [0,0,Math.PI/2 + s*k*.15]);
-  // espalda (pegado al pecho) y cola (pegada a la cadera)
-  const cb = bones.chest, co = J.chest, hipB = bones.hips;
-  const C = (x,y,z) => V(x, y, z);  // relativo al hueso pecho
-  if (has("pinchos")) for (let i=0;i<4;i++) put(G.cone, accM, cb, C(0,.18-i*.1,-.13), [.03,.08,.03], [-Math.PI/2,0,0]);
-  if (has("mochila")) put(G.box, M(new THREE.Color(st.top).multiplyScalar(.75)), cb, C(0,.02,-.17), [.3,.36,.13]);
-  face.wings = [];
+  const root = new THREE.Group(); root.add(body);
+  body.scale.setScalar(st.height);
+  const hh = new THREE.Group(); hh.position.copy(T(0,0,0)); hb.add(hh);
+  const chH = new THREE.Group(); bones.chest.add(chH); const hpH = new THREE.Group(); bones.hips.add(hpH);
+  addAccessories(st, {head:hh, R, chest:chH, hips:hpH, root, face});
+  root.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return {root, bones, face};
+}
+
+/* ---------- Accesorios comunes (personaje propio y bases VRoid) ---------- */
+function addAccessories(st, {head, R, chest, hips, root, face}){
+  const M = (c, extra={}) => new THREE.MeshToonMaterial({color:new THREE.Color(c), gradientMap:gradTex, ...extra});
+  const B = (c, extra={}) => new THREE.MeshBasicMaterial({color:new THREE.Color(c), ...extra});
+  const put = (geo, mat, par, pos, scale, rot) => { const m = new THREE.Mesh(geo, mat); m.position.copy(pos); if (typeof scale === "number") m.scale.setScalar(scale); else m.scale.set(...scale); if (rot) m.rotation.set(...rot); m.castShadow = true; par.add(m); return m; };
+  const has = k => st.extras.includes(k);
+  const skinM = M(st.skin), hairM = M(st.hair), accM = M(st.acc), lighter = new THREE.Color(st.skin).lerp(new THREE.Color("#ffffff"), .35);
+  face.glow = face.glow || []; face.wings = []; face.tail = []; face.sparkles = [];
+  // orejas de animal
+  if (st.ears === "gato" || st.ears === "caballo") for (const s of [-1,1]) put(G.cone, skinM, head, V(s*R*.6,R*.85,-R*.05), st.ears==="gato" ? [R*.28,R*.6,R*.18] : [R*.22,R*.55,R*.15], [0,0,-s*.35]);
+  if (st.ears === "oso") for (const s of [-1,1]){ put(G.sphere, skinM, head, V(s*R*.72,R*.72,-R*.1), [R*.3,R*.3,R*.18]); put(G.sphere, M(lighter), head, V(s*R*.72,R*.72,R*.02), [R*.17,R*.17,R*.06]); }
+  if (st.ears === "perro") for (const s of [-1,1]) put(G.sphere, hairM, head, V(s*R*.95,-R*.1,-R*.1), [R*.22,R*.6,R*.38], [0,0,s*.25]);
+  if (st.ears === "conejo") for (const s of [-1,1]) put(G.sphere, skinM, head, V(s*R*.38,R*1.45,-R*.05), [R*.2,R*.75,R*.12], [0,0,-s*.12]);
+  if (st.ears === "elfo") for (const s of [-1,1]) put(G.cone, skinM, head, V(s*R*1.05,R*.15,-R*.05), [R*.14,R*.55,R*.08], [0,0,-s*1.1]);
+  // cabeza
+  if (has("cuerno")){ const h = put(G.cone, M("#ffd76b"), head, V(0,R*1.25,R*.38), [R*.3,R*1.8,R*.3], [.35,0,0]);
+    for (let i=0;i<3;i++) put(new THREE.TorusGeometry(1,.12,6,16), M("#d9a830"), h, V(0,-.25+i*.22,0), .8-i*.2, [Math.PI/2,0,0]); }
+  if (has("cuernos")) for (const s of [-1,1]) put(G.cone, M(st.acc), head, V(s*R*.5,R*.95,-R*.1), [R*.18,R*.8,R*.18], [-.35,0,-s*.4]);
+  if (has("antena")){ put(G.cyl, M("#555"), head, V(0,R*1.15,0), [.008,R*.8,.008]); face.glow.push(put(G.sphere, B("#ff4d8d"), head, V(0,R*1.6,0), R*.16)); }
+  if (has("corona")){ const c = new THREE.Group(); c.position.set(0,R*.9,0); head.add(c);
+    put(new THREE.CylinderGeometry(R*.48,R*.52,R*.26,20,1,true), M("#ffcf33",{side:THREE.DoubleSide}), c, V(), 1);
+    for (let i=0;i<6;i++){ const a = i/6*Math.PI*2; put(G.cone, M("#ffcf33"), c, V(Math.sin(a)*R*.48,R*.25,Math.cos(a)*R*.48), [R*.1,R*.26,R*.1]); }
+    put(G.sphere, B("#ff4d8d"), c, V(0,0,R*.52), R*.08); }
+  if (has("casco")){ put(G.sphere, new THREE.MeshStandardMaterial({color:"#bfe6ff", transparent:true, opacity:.22, roughness:.05, depthWrite:false}), head, V(0,0,0), R*1.42); put(new THREE.TorusGeometry(R*1.25,.025,10,32), M("#e8e8ee"), head, V(0,-R*.9,0), 1, [Math.PI/2,0,0]); }
+  // espalda
+  if (has("pinchos")) for (let i=0;i<4;i++) put(G.cone, accM, chest, V(0,.18-i*.1,-.13), [.03,.08,.03], [-Math.PI/2,0,0]);
+  if (has("mochila")) put(G.box, M(new THREE.Color(st.top).multiplyScalar(.75)), chest, V(0,.02,-.17), [.3,.36,.13]);
   if (st.wings !== "no") for (const s of [-1,1]){
-    const piv = new THREE.Group(); piv.position.set(s*.06,.08,-.13); cb.add(piv);
+    const piv = new THREE.Group(); piv.position.set(s*.06,.08,-.13); chest.add(piv);
     if (st.wings === "dragon"){ const sh = new THREE.Shape(); sh.moveTo(0,0); sh.lineTo(.75,.45); sh.lineTo(.68,.1); sh.lineTo(.56,-.02); sh.lineTo(.44,.04); sh.lineTo(.3,-.15); sh.lineTo(0,-.1);
       const m = put(new THREE.ShapeGeometry(sh), M(st.acc,{side:THREE.DoubleSide}), piv, V(), 1); m.scale.x = s; }
     else if (st.wings === "hada"){ for (const [y,sx,sy,c] of [[.12,.32,.22,st.acc],[-.12,.22,.15,"#ffd1f0"]]){ const m = put(new THREE.CircleGeometry(1,32), M(c,{side:THREE.DoubleSide,transparent:true,opacity:.75}), piv, V(s*sx*.9,y,0), [sx,sy,1]); m.rotation.z = s*(y>0?.45:-.4); } }
     else for (let i=0;i<5;i++) put(G.sphere, M("#ffffff"), piv, V(s*(.12+i*.1),.1+i*.06,0), [.2,.06,.02], [0,0,s*(.55+i*.06)]);
     face.wings.push({piv, s});
   }
-  if (st.cape){ const g = new THREE.PlaneGeometry(.5, 1.05, 1, 6); g.translate(0,-.52,0); face.cape = put(g, M(st.acc,{side:THREE.DoubleSide}), cb, C(0,.2,-.15), 1); }
-  face.tail = [];
+  if (st.cape){ const g = new THREE.PlaneGeometry(.5, 1.05, 1, 6); g.translate(0,-.52,0); face.cape = put(g, M(st.acc,{side:THREE.DoubleSide}), chest, V(0,.2,-.15), 1); }
   if (st.tail !== "no"){ for (let i=0;i<10;i++){ const c = st.tail==="arcoiris" ? new THREE.Color().setHSL(i/10,.95,.62) : (st.tail==="dragon"&&i===9 ? new THREE.Color(st.acc) : new THREE.Color(st.tail==="perro"?st.hair:st.skin));
-    const r = st.tail==="dragon" ? .07-i*.005 : st.tail==="arcoiris" ? .05 : .045-i*.002; const m = put(G.sphere, M(c), hipB, V(), Math.max(.02,r)); face.tail.push(m); } face.tailType = st.tail; }
-  const root = new THREE.Group(); root.add(body);
-  body.scale.setScalar(st.height);
-  face.sparkles = [];
+    const r = st.tail==="dragon" ? .07-i*.005 : st.tail==="arcoiris" ? .05 : .045-i*.002; const m = put(G.sphere, M(c), hips, V(), Math.max(.02,r)); face.tail.push(m); } face.tailType = st.tail; }
   if (st.sparkles){ const R2 = rng(5); for (let i=0;i<16;i++){ const m = new THREE.Mesh(G.octa, B(new THREE.Color().setHSL(i/16,.9,.65))); m.userData = {a:R2()*7, d:.55+R2()*.5, y:.3+R2()*1.5, sp:(R2()>.5?1:-1)*(.3+R2()*.5)}; root.add(m); face.sparkles.push(m); } }
-  root.traverse(o => { if (o.isMesh) o.castShadow = true; });
-  return {root, bones, face};
+}
+
+/* ---------- Bases VRoid: recolorear y añadir accesorios ---------- */
+const MAT_CAT = [[/hair/i,"hair"],[/_SKIN|skin/i,"skin"],[/tops|onepiece|inner|jacket|coat/i,"top"],[/bottom|skirt|pants/i,"bottom"],[/shoe|boot/i,"shoes"]];
+const matCat = n => { for (const [re,c] of MAT_CAT) if (re.test(n)) return c; return null; };
+function texCanvas(tex){ const im = tex.image; const w = im.width, h = im.height; const c = document.createElement("canvas"); c.width = w; c.height = h; const g = c.getContext("2d", {willReadFrequently:true}); g.drawImage(im, 0, 0); return {c, g, w, h}; }
+function makeTex(orig, canvas){ const t = new THREE.CanvasTexture(canvas); t.flipY = orig.flipY; t.colorSpace = orig.colorSpace; t.wrapS = orig.wrapS; t.wrapT = orig.wrapT; t.channel = orig.channel; return t; }
+// textura en gris claro (para teñir) y, si hace falta, con estampado
+function recolorTex(cache, orig, pattern, c1, c2){
+  const key = orig.uuid + "|" + pattern + "|" + (pattern === "liso" ? "" : c1 + c2);
+  if (cache.has(key)) return cache.get(key);
+  const {c, g, w, h} = texCanvas(orig); const d = g.getImageData(0, 0, w, h), p = d.data;
+  const A = new THREE.Color(c1), Bc = new THREE.Color(c2), tmp = new THREE.Color(), white = new THREE.Color(1,1,1);
+  for (let y=0; y<h; y++){
+    if (pattern === "arcoiris") tmp.setHSL((y/h*3) % 1, .9, .6);
+    else if (pattern === "rayas") tmp.copy(Math.floor(y/h*24) % 2 ? A : white);
+    else if (pattern === "degradado") tmp.copy(A).lerp(Bc, y/h);
+    else tmp.copy(white);
+    const r = tmp.r*255, gg = tmp.g*255, b = tmp.b*255;
+    for (let x=0; x<w; x++){ const i = (y*w+x)*4; const L = (.3*p[i] + .59*p[i+1] + .11*p[i+2]) / 255; const v = .38 + .62*L;
+      p[i] = r*v; p[i+1] = gg*v; p[i+2] = b*v; }
+  }
+  g.putImageData(d, 0, 0);
+  const t = makeTex(orig, c); cache.set(key, t); return t;
+}
+function applyCustomVRM(Mo, st){
+  const C = Mo.custom || (Mo.custom = {orig:new Map(), cache:new Map(), groups:[]});
+  for (const g of C.groups) g.parent && g.parent.remove(g);
+  C.groups = [];
+  // materiales
+  const mats = new Set(); Mo.root.traverse(o => { if (o.isMesh) (Array.isArray(o.material)?o.material:[o.material]).forEach(m => mats.add(m)); });
+  for (const m of mats){
+    const cat = matCat(m.name || ""); if (!cat || !m.color) continue;
+    if (!C.orig.has(m)) C.orig.set(m, {map:m.map, color:m.color.clone(), shade:m.shadeColorFactor?.clone?.(), shadeTex:m.shadeMultiplyTexture});
+    const o = C.orig.get(m);
+    m.map = o.map; m.color.copy(o.color); if (o.shade) m.shadeColorFactor.copy(o.shade); if ("shadeMultiplyTexture" in m) m.shadeMultiplyTexture = o.shadeTex;
+    if (!st.recolor || !o.map || !o.map.image) continue;
+    const pattern = (cat === "top" || cat === "bottom") ? st.pattern : "liso";
+    const col = {hair:st.hair, skin:st.skin, top:st.top, bottom:st.bottom, shoes:st.shoes}[cat];
+    let t; try { t = recolorTex(C.cache, o.map, pattern, col, st.acc); } catch(e){ console.warn("No se pudo recolorear", m.name, e); continue; }
+    m.map = t; if ("shadeMultiplyTexture" in m && o.shadeTex) m.shadeMultiplyTexture = t;
+    const tint = pattern === "liso" ? new THREE.Color(col) : new THREE.Color(1,1,1);
+    m.color.copy(tint); if (m.shadeColorFactor) m.shadeColorFactor.copy(tint).multiplyScalar(.72);
+    m.needsUpdate = true;
+  }
+  // soportes para accesorios, pegados a los huesos (giran con ellos)
+  const holder = (bone, offset, scale) => { const g = new THREE.Group(); const iq = Mo.rest[bone].wq.clone().invert();
+    g.quaternion.copy(iq); g.position.copy(offset).applyQuaternion(iq); g.scale.setScalar(scale); Mo.bones[bone].add(g); C.groups.push(g); return g; };
+  const hy = Mo.rest.head.wp.y - Mo.root.position.y, R = Math.max(.08, hy * .08) * 1.12, k = hy / 1.5;
+  const face = {glow:[]};
+  const chestBone = Mo.bones.upperChest ? "upperChest" : Mo.bones.chest ? "chest" : "spine";
+  const H = holder("head", V(0, R*.85, 0), 1), Ch = holder(chestBone, V(), k), Hp = holder("hips", V(), k);
+  const sp = new THREE.Group(); Mo.root.add(sp); C.groups.push(sp);
+  addAccessories(st, {head:H, R, chest:Ch, hips:Hp, root:sp, face});
+  for (const g of C.groups) g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  Mo.face = face; Mo.label = st.name;
+  Mo.root.scale.setScalar(st.height || 1);
+}
+
+const BASE_LOAD = {id:null, p:null};
+async function loadBase(id){
+  if (MODEL && MODEL.baseId === id) return true;
+  if (BASE_LOAD.id === id && BASE_LOAD.p) return BASE_LOAD.p;
+  BASE_LOAD.id = id;
+  BASE_LOAD.p = (async () => {
+    let ok = false;
+    if (id === "builtin:ejemplo") ok = await loadModel(SAMPLE_VRM, "personaje de ejemplo");
+    else if (id.startsWith("repo:")) ok = await loadModel(encodeURIComponent(id.slice(5)), prettyName(id.slice(5)));
+    else if (id.startsWith("local:")){ try { const rec = await idbDo("readonly", s => s.get(id)); if (rec) ok = await loadModel(rec.blob, rec.name); } catch(e){} }
+    if (ok) MODEL.baseId = id; else msg("No se encontró la base del personaje", 3500);
+    return ok;
+  })();
+  const r = await BASE_LOAD.p; BASE_LOAD.p = null; BASE_LOAD.id = null; return r;
+}
+function baseOptions(){
+  const o = [["propio","🧍 Propio (hecho en esta web)"],["builtin:ejemplo","👧 Realista: personaje de ejemplo"]];
+  for (const c of [...REPO_CHARS, ...LOCAL_CHARS]) o.push([c.id, "🧑 Realista: " + c.name]);
+  return o;
 }
 
 function useCharacter(st){
+  if (st.base && st.base !== "propio") return (async () => { if (!(await loadBase(st.base))) return false; applyCustomVRM(MODEL, st); return true; })();
   const {root, bones, face} = buildCharacter(st);
   unloadModel();
   scene.add(root);
@@ -1352,20 +1442,20 @@ function useCharacter(st){
 function updateFace(M, head, t){
   const f = M.face; if (!f) return;
   const bl = [head.blinkA, head.blinkB, (head.blinkA+head.blinkB)/2];
-  f.eyes.forEach((e,i) => e.scale.y = Math.max(.08, 1 - bl[i]));
+  (f.eyes || []).forEach((e,i) => e.scale.y = Math.max(.08, 1 - bl[i]));
   const open = Math.min(1, head.jaw);
-  f.mouthOpen.visible = open > .08; f.smile.visible = !f.mouthOpen.visible;
-  f.mouthOpen.scale.set(.035 + open*.015, .006 + open*.035, .02);
-  f.smile.scale.set(1 + head.smile*.4, 1 + head.smile*.6, 1);
+  if (f.mouthOpen){ f.mouthOpen.visible = open > .08; f.smile.visible = !f.mouthOpen.visible;
+    f.mouthOpen.scale.set(.035 + open*.015, .006 + open*.035, .02);
+    f.smile.scale.set(1 + head.smile*.4, 1 + head.smile*.6, 1); }
   for (const g of f.glow) g.material.color.setHSL((t/5 % 360)/360, .95, .6);
   const flap = Math.sin(t/260)*.35;
-  for (const w of f.wings) w.piv.rotation.y = w.s * (.35 + flap);
+  for (const w of (f.wings||[])) w.piv.rotation.y = w.s * (.35 + flap);
   if (f.cape) f.cape.rotation.x = -.18 - Math.abs(Math.sin(t/500))*.12;
-  if (f.tail.length){ const wag = Math.sin(t/(f.tailType==="perro"?120:420))*.35;
+  if (f.tail && f.tail.length){ const wag = Math.sin(t/(f.tailType==="perro"?120:420))*.35;
     f.tail.forEach((m,i) => { const k = i/(f.tail.length-1); const y = f.tailType==="perro" ? .05 + k*.25 : f.tailType==="gato" ? Math.sin(k*2.6)*.3 - .05 : -.05 - k*.18 + Math.sin(k*3)*.08;
       m.position.set(Math.sin(k*1.6)*wag*.6, y, -.12 - k*(f.tailType==="arcoiris"?.38:.45)); }); }
   const hips = M.bones.hips.getWorldPosition(_v1);
-  f.sparkles.forEach((m,i) => { const u = m.userData, a = u.a + t/1000*u.sp; m.position.set(hips.x - M.root.position.x + Math.cos(a)*u.d, u.y + Math.sin(t/400+i)*.05, Math.sin(a)*u.d); m.rotation.y = t/300; m.scale.setScalar(.018 + .012*Math.abs(Math.sin(t/300+i))); });
+  (f.sparkles||[]).forEach((m,i) => { const u = m.userData, a = u.a + t/1000*u.sp; m.position.set(hips.x - M.root.position.x + Math.cos(a)*u.d, u.y + Math.sin(t/400+i)*.05, Math.sin(a)*u.d); m.rotation.y = t/300; m.scale.setScalar(.018 + .012*Math.abs(Math.sin(t/300+i))); });
 }
 
 /* ---------- Biblioteca ---------- */
@@ -1376,11 +1466,27 @@ function libActive(id){ try { if (id === undefined) return localStorage.getItem(
 
 /* ---------- Interfaz del editor ---------- */
 const ED = {st:null, id:null, prev:null};
+const OWN_ONLY = new Set(["build","head","sleeves","legs","eyes","mouth","nose","cheeks","hairStyle"]), OWN_EXTRAS = new Set(["antifaz","gafas","bigotes"]);
 function renderEditorForm(){
   const box = $("edForm"); box.innerHTML = "";
+  const vrm = ED.st.base && ED.st.base !== "propio";
+  const bsec = document.createElement("div"); bsec.className = "sec";
+  bsec.innerHTML = `<h3>Tipo de personaje</h3><select id="edBase"></select><label class="edrow tog" id="edRecRow"><span>Cambiar los colores del modelo</span><input type="checkbox" id="edRecolor"></label><span style="font-size:13px;color:var(--mut)" id="edBaseNote"></span>`;
+  box.appendChild(bsec);
+  const bs = bsec.querySelector("#edBase"); for (const [v,n] of baseOptions()) bs.add(new Option(n, v)); bs.value = ED.st.base || "propio";
+  if (bs.value !== (ED.st.base || "propio")){ bs.value = "propio"; ED.st.base = "propio"; }
+  bs.onchange = () => { ED.st.base = bs.value; if (bs.value !== "propio" && ED.st.ears === "humanas") ED.st.ears = "ninguna"; renderEditorForm(); edRebuild(); };
+  const rc = bsec.querySelector("#edRecolor"); rc.checked = !!ED.st.recolor; rc.onchange = () => { ED.st.recolor = rc.checked; edRebuild(); };
+  bsec.querySelector("#edRecRow").style.display = vrm ? "" : "none";
+  bsec.querySelector("#edBaseNote").textContent = vrm ? "Usa un personaje de VRoid como base: se cambian los colores y se añaden orejas, cuernos, alas, cola, capa… Para añadir más bases, sube archivos .vrm al repositorio de GitHub o cárgalos con «Cargar mi personaje»." : "Personaje hecho en esta web, con todas las opciones.";
   for (const [title, items] of EDIT_SCHEMA){
     const sec = document.createElement("div"); sec.className = "sec"; sec.innerHTML = `<h3>${title}</h3>`;
-    for (const [k, label, type, a, b, c] of items){
+    let shown = 0;
+    for (const [k, label, type, a0, b, c] of items){
+      if (vrm && OWN_ONLY.has(k)) continue;
+      const a = (vrm && type === "multi") ? a0.filter(([v]) => !OWN_EXTRAS.has(v)) : a0;
+      if (type === "multi" && !a.length) continue;
+      shown++;
       const row = document.createElement("label"); row.className = "edrow";
       if (type === "range"){ row.innerHTML = `<span>${label}</span><input type="range" min="${a}" max="${b}" step="${c}">`; const i = row.querySelector("input"); i.value = ED.st[k]; i.oninput = () => { ED.st[k] = +i.value; edRebuild(); }; }
       else if (type === "color"){ row.innerHTML = `<span>${label}</span><input type="color">`; const i = row.querySelector("input"); i.value = ED.st[k]; i.oninput = () => { ED.st[k] = i.value; edRebuild(); }; }
@@ -1391,14 +1497,16 @@ function renderEditorForm(){
           ch.onclick = e => { e.preventDefault(); const L = ED.st.extras; const j = L.indexOf(v); if (j >= 0) L.splice(j,1); else L.push(v); ch.classList.toggle("on"); edRebuild(); }; d.appendChild(ch); } }
       sec.appendChild(row);
     }
-    box.appendChild(sec);
+    if (shown) box.appendChild(sec);
   }
   $("edName").value = ED.st.name;
 }
 let edTimer = 0;
 function edRebuild(){ clearTimeout(edTimer); edTimer = setTimeout(() => useCharacter(ED.st), 60); }
 function openEditor(st, id){
-  ED.st = JSON.parse(JSON.stringify(st || {...CH_DEF, extras:[]})); ED.id = id || null;
+  const firstBase = [...REPO_CHARS, ...LOCAL_CHARS].find(c => /\.vrm$/i.test(c.id) || c.id.startsWith("local:"));
+  ED.st = JSON.parse(JSON.stringify(st || {...CH_DEF, extras:[], base: firstBase ? firstBase.id : "propio", ears: firstBase ? "ninguna" : "humanas"})); ED.id = id || null;
+  if (!ED.st.base) ED.st.base = "propio";
   ED.prev = MODEL ? {label: MODEL.label} : null;
   S.editing = true; document.body.classList.add("editing");
   $("start").style.display = "none"; openSheet(false);
@@ -1412,11 +1520,62 @@ function closeEditor(){
   if (!S.camOn) $("start").style.display = "";
   renderLibrary();
 }
+/* ---------- Personajes en archivo: en la web (GitHub) y en este dispositivo ---------- */
+const GH = (() => { const h = location.hostname, p = location.pathname.split("/").filter(Boolean);
+  return h.endsWith(".github.io") ? {owner: h.split(".")[0], repo: p[0] || ""} : {owner:"Avsolute", repo:"avatar"}; })();
+let REPO_CHARS = [], LOCAL_CHARS = [];
+const prettyName = f => f.replace(/\.(vrm|glb)$/i,"").replace(/[_-]+/g," ").trim();
+async function loadRepoChars(){
+  try { const r = await fetch(`https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/`, {cache:"no-store"}); if (!r.ok) return;
+    REPO_CHARS = (await r.json()).filter(f => /\.(vrm|glb)$/i.test(f.name)).map(f => ({id:"repo:"+f.name, name:prettyName(f.name), url:encodeURIComponent(f.name)}));
+    renderLibrary(); } catch(e){}
+}
+function idb(){ return new Promise((res, rej) => { const r = indexedDB.open("avatar3d", 1); r.onupgradeneeded = () => r.result.createObjectStore("modelos", {keyPath:"id"}); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function idbDo(mode, fn){ const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction("modelos", mode), st = tx.objectStore("modelos"), rq = fn(st); tx.oncomplete = () => res(rq && rq.result); tx.onerror = () => rej(tx.error); }); }
+async function loadLocalChars(){ try { const all = await idbDo("readonly", st => st.getAll()); LOCAL_CHARS = (all||[]).map(x => ({id:x.id, name:x.name})); renderLibrary(); } catch(e){} }
+async function saveLocalModel(file){
+  try { const id = "local:" + Date.now().toString(36); await idbDo("readwrite", st => st.put({id, name: prettyName(file.name), blob: file}));
+    libActive(id); await loadLocalChars(); msg("Guardado en Mis personajes: " + prettyName(file.name), 3000); } catch(e){ console.warn(e); msg("No se pudo guardar el personaje en este navegador", 3500); }
+}
+async function useFileChar(id, quiet){
+  libActive(id); openSheet(false); renderLibrary();
+  if (id.startsWith("repo:")){ const f = id.slice(5); return loadModel(encodeURIComponent(f), prettyName(f)); }
+  try { const rec = await idbDo("readonly", st => st.get(id)); if (rec) return loadModel(rec.blob, rec.name); } catch(e){}
+  if (!quiet) msg("Ese personaje ya no está en este navegador", 3000);
+}
+const BUILTINS = [["builtin:muneco","🧸 Muñeco rápido (según la frase)"],["builtin:ejemplo","👧 Personaje realista de ejemplo"]];
+async function useBuiltin(bid, quiet){
+  libActive(bid); openSheet(false); renderLibrary();
+  if (bid === "builtin:ejemplo") await loadModel(SAMPLE_VRM, "personaje de ejemplo (pixiv)");
+  else { unloadModel(); if (!quiet) msg("Muñeco 3D según la frase"); }
+}
+function startActiveCharacter(){
+  const act = libActive();
+  if (act === "builtin:ejemplo") return useBuiltin(act, true);
+  if (act && (act.startsWith("repo:") || act.startsWith("local:"))) return useFileChar(act, true);
+  const ch = libLoad().find(x => x.id === act); if (ch) useCharacter(ch.st);
+}
 function renderLibrary(){
   const list = libLoad(), act = libActive();
   for (const boxId of ["libList","libList0"]){
     const box = $(boxId); if (!box) continue; box.innerHTML = "";
-    if (!list.length){ box.innerHTML = `<span style="font-size:13px;color:var(--mut)">Aún no hay personajes guardados.</span>`; continue; }
+    // personajes fijos que siempre están disponibles
+    for (const [bid, label] of BUILTINS){
+      const row = document.createElement("div"); row.className = "librow" + ((act || "builtin:muneco") === bid ? " act" : "");
+      row.innerHTML = `<b>${label}</b><button class="btn sm">Usar</button>`;
+      row.querySelector("button").onclick = () => useBuiltin(bid);
+      box.appendChild(row);
+    }
+    for (const ch of [...REPO_CHARS, ...LOCAL_CHARS]){
+      const local = ch.id.startsWith("local:");
+      const row = document.createElement("div"); row.className = "librow" + (ch.id === act ? " act" : "");
+      row.innerHTML = `<b>${local ? "📁" : "☁️"} ${ch.name.replace(/</g,"&lt;")}</b><button class="btn sm">Usar</button>` + (local ? `<button class="btn sm">🗑</button>` : "");
+      const [bU, bD] = row.querySelectorAll("button");
+      bU.onclick = () => useFileChar(ch.id);
+      if (bD) bD.onclick = () => { $("confirmTxt").textContent = `¿Quitar «${ch.name}» de este navegador? El archivo original no se borra.`; $("confirm").style.display = "flex";
+        $("confirmYes").onclick = async () => { try { await idbDo("readwrite", st => st.delete(ch.id)); } catch(e){} if (libActive() === ch.id) libActive(null); $("confirm").style.display = "none"; loadLocalChars(); }; };
+      box.appendChild(row);
+    }
     for (const ch of list){
       const row = document.createElement("div"); row.className = "librow" + (ch.id === act ? " act" : "");
       row.innerHTML = `<b>${ch.st.name.replace(/</g,"&lt;")}</b><button class="btn sm">Usar</button><button class="btn sm">Editar</button><button class="btn sm">🗑</button>`;
@@ -1431,14 +1590,15 @@ function renderLibrary(){
 }
 $("confirmNo").onclick = () => $("confirm").style.display = "none";
 $("edName").oninput = e => ED.st.name = e.target.value || "Mi personaje";
-$("edFromPrompt").onclick = () => { const t = $("edPrompt").value.trim(); if (!t) return; ED.st = settingsFromPrompt(t); renderEditorForm(); useCharacter(ED.st); };
+$("edFromPrompt").onclick = () => { const t = $("edPrompt").value.trim(); if (!t) return; ED.st = settingsFromPrompt(t, ED.st.base); renderEditorForm(); useCharacter(ED.st); };
 $("edPrompt").addEventListener("keydown", e => { if (e.key === "Enter") $("edFromPrompt").click(); });
 $("edSave").onclick = () => { const list = libLoad(); const id = ED.id || ("p" + Date.now().toString(36));
   const item = {id, st: JSON.parse(JSON.stringify(ED.st))}; const i = list.findIndex(x => x.id === id); if (i >= 0) list[i] = item; else list.push(item);
   if (libSave(list)){ ED.id = id; libActive(id); msg("Guardado en Mis personajes: " + ED.st.name, 2500); renderLibrary(); } };
 $("edUse").onclick = () => { $("edSave").click(); closeEditor(); msg("Usando: " + ED.st.name, 2500); };
-$("edClose").onclick = () => { const act = libLoad().find(x => x.id === libActive()); if (act) useCharacter(act.st); else unloadModel(); closeEditor(); };
+$("edClose").onclick = () => { unloadModel(); startActiveCharacter(); closeEditor(); };
 $("edExport").onclick = () => {
+  if (ED.st.base && ED.st.base !== "propio"){ msg("Exportar .glb solo está disponible para personajes propios", 3500); return; }
   const {root} = buildCharacter(ED.st);
   new GLTFExporter().parse(root, res => {
     const blob = new Blob([res], {type:"model/gltf-binary"}), a = document.createElement("a");
@@ -1449,7 +1609,7 @@ $("edExport").onclick = () => {
 for (const id of ["edNew","edNew0"]) $(id).onclick = () => openEditor(null, null);
 
 
-renderLibrary();
+renderLibrary(); loadLocalChars(); loadRepoChars();
 /* ---------------- Grabación ---------------- */
 let rec, chunks = [], recBlob, recExt;
 $("bRec").onclick = () => {
