@@ -175,6 +175,7 @@ const CHARS = {
   hada:      {k:["hada","princesa","mariposa","duende"], body:"#ffd1f0", acc:"#b06bff", ex:["alas","brillos","corona"], bg:"bosque"},
   superheroe:{k:["superheroe","heroe","super","heroina","superheroina"], body:"#3355ff", acc:"#ff3344", ex:["capa","antifaz"], bg:"ciudad"},
   monstruo:  {k:["monstruo","bicho","alien","extraterrestre","marciano"], body:"#8e44ff", acc:"#c6ff3d", ex:["cuernos","tresojos"], bg:"espacio"},
+  ojo:       {k:[], body:"#ffffff", acc:"#f0c35c", ex:[], bg:"marca"},
   muneco:    {k:[], body:"#ffcf5a", acc:"#ff6b6b", ex:[], bg:"arcoiris"},
 };
 const COLORS = {
@@ -191,14 +192,14 @@ const BGWORDS = {espacio:"espacio", estrellas:"espacio", galaxia:"espacio", luna
 
 function parsePrompt(text){
   const t = norm(text), words = t.split(/[^a-z0-9ñ]+/).filter(Boolean);
-  let type = "muneco";
-  for (const [k,c] of Object.entries(CHARS)) if (c.k.some(w => words.includes(w) || t.includes(w))) { type = k; break; }
+  let type = /ahora ?me ?veo|avsolute|globo ocular|\bojo\b|\bojito\b|\bojazo\b/.test(t) ? "ojo" : "muneco";
+  if (type === "muneco") for (const [k,c] of Object.entries(CHARS)) if (c.k.some(w => words.includes(w) || t.includes(w))) { type = k; break; }
   const base = CHARS[type];
   const cfg = {type, body:base.body, acc:base.acc, rainbow:false, ex:new Set(base.ex), bg:base.bg};
   if (/(de colores|multicolor|arco ?iris|colorid)/.test(t)) cfg.rainbow = true;
   const cols = words.filter(w => COLORS[w]).map(w => COLORS[w]);
-  if (cols[0]) cfg.body = cols[0];
-  if (cols[1]) cfg.acc = cols[1];
+  if (type === "ojo"){ if (cols[0]) cfg.acc = cols[0]; }   // en el ojo, el color elegido es el del iris
+  else { if (cols[0]) cfg.body = cols[0]; if (cols[1]) cfg.acc = cols[1]; }
   for (const w of words) { if (EXTRAS[w]) cfg.ex.add(EXTRAS[w]); if (BGWORDS[w]) cfg.bg = BGWORDS[w]; }
   if (/sin alas/.test(t)) cfg.ex.delete("alas");
   if (/sin cola/.test(t)) cfg.ex.delete("cola");
@@ -206,9 +207,9 @@ function parsePrompt(text){
 }
 
 /* ---------------- UI de inicio ---------------- */
-const QUICK = ["Quiero ser un unicornio de colores","Un robot plateado con antena","Un dragón verde con alas","Un gato naranja",
+const QUICK = ["Quiero ser Ahora me veo","Quiero ser un unicornio de colores","Un robot plateado con antena","Un dragón verde con alas","Un gato naranja",
   "Un astronauta en el espacio","Un hada rosa con corona","Un superhéroe azul con capa","Un monstruo morado","Un oso marrón en el bosque","Un perro en la playa"];
-const BGS = [["auto","Automático (según el avatar)"],["arcoiris","Arcoíris"],["espacio","Espacio"],["bosque","Bosque"],["ciudad","Ciudad"],
+const BGS = [["auto","Automático (según el avatar)"],["marca","Amarillo «Ahora me veo»"],["arcoiris","Arcoíris"],["espacio","Espacio"],["bosque","Bosque"],["ciudad","Ciudad"],
   ["playa","Playa"],["nieve","Nieve"],["croma","Croma verde"],["camara","Cámara real"],["liso","Negro liso"],["imagen","Imagen propia"]];
 for (const sel of [$("sBg"), $("sBg2")]) for (const [v,n] of BGS) sel.add(new Option(n, v));
 function fillChips(el, input){
@@ -521,6 +522,15 @@ function renderBg(type, W, H){
     g.fillStyle="#fff"; g.beginPath(); g.moveTo(0,H*.8); g.quadraticCurveTo(W*.3,H*.72,W*.6,H*.8); g.quadraticCurveTo(W*.85,H*.86,W,H*.78); g.lineTo(W,H); g.lineTo(0,H); g.fill();
     for (let i=0;i<7;i++){ const x=R()*W, h=H*(.2+R()*.15), w=h*.5, b=H*.82; g.fillStyle="#2f5e4a"; g.beginPath(); g.moveTo(x,b-h); g.lineTo(x+w/2,b); g.lineTo(x-w/2,b); g.fill();
       g.fillStyle="#fff"; g.beginPath(); g.moveTo(x,b-h); g.lineTo(x+w*.15,b-h*.7); g.lineTo(x-w*.15,b-h*.7); g.fill(); }
+  } else if (type === "marca"){
+    g.fillStyle = AMV.yellow; g.fillRect(0,0,W,H);
+    const rg = g.createRadialGradient(W/2,H*.45,0,W/2,H*.45,Math.max(W,H)*.75); rg.addColorStop(0,"rgba(255,255,255,.16)"); rg.addColorStop(1,"rgba(120,80,0,.10)");
+    g.fillStyle = rg; g.fillRect(0,0,W,H);
+    const fs = u*.055; g.fillStyle = AMV.ink; g.textAlign = "right"; g.textBaseline = "alphabetic";
+    g.font = `900 ${fs}px "Arial Black","Segoe UI Black",Impact,system-ui,sans-serif`; g.fillText("AHORA ME VEO", W - u*.04, H*.06 + fs);
+    g.font = `400 ${fs*.42}px system-ui,sans-serif`; const by = "by ", av = "Avsolute.";
+    g.font = `800 ${fs*.42}px system-ui,sans-serif`; const avW = g.measureText(av).width; g.fillText(av, W - u*.04, H*.06 + fs*1.6);
+    g.font = `400 ${fs*.42}px system-ui,sans-serif`; g.fillText(by, W - u*.04 - avW, H*.06 + fs*1.6);
   } else if (type === "croma"){ g.fillStyle = "#00b140"; g.fillRect(0,0,W,H); }
   else { g.fillStyle = "#000"; g.fillRect(0,0,W,H); }
   return c;
@@ -540,6 +550,7 @@ function blob(x,y,rx,ry,col,rot=0){ ctx.beginPath(); ctx.ellipse(x,y,rx,ry,rot,0
 
 function drawAvatar(rig, t){
   const {p, shW, head, hands} = rig, cfg = S.cfg; partIdx = 0;
+  if (cfg.type === "ojo"){ drawOjo(rig, t); return; }
   const sh = mid(p[11],p[12]), hip = mid(p[23],p[24]);
   const armW = shW*.26, legW = shW*.32;
   // detrás: alas, capa, cola
@@ -579,6 +590,126 @@ function drawAvatar(rig, t){
   }
   drawHead(head, cfg, t, shW);
   if (cfg.ex.has("brillos")) drawSparkles(sh, shW, t);
+}
+
+/* ---------------- «Ahora me veo»: el ojo con guantes y zapatillas ---------------- */
+const AMV = {yellow:"#f0c35c", ink:"#16191d"};
+function hose(a, b, c, w){   // brazo o pierna «de goma» que pasa por el codo/rodilla
+  const cx = 2*b.x - (a.x+c.x)/2, cy = 2*b.y - (a.y+c.y)/2;
+  ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.quadraticCurveTo(cx,cy,c.x,c.y);
+  ctx.strokeStyle = AMV.ink; ctx.lineWidth = w; ctx.stroke();
+}
+function glove(x, y, ang, s){   // guante blanco cerrado (puño)
+  ctx.save(); ctx.translate(x,y); ctx.rotate(ang);
+  ctx.lineWidth = Math.max(2, s*.11); ctx.strokeStyle = AMV.ink; ctx.fillStyle = "#fff"; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.roundRect(-s*.78, -s*.4, s*.34, s*.8, s*.12); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(0, 0, s*.56, s*.5, 0, 0, 7); ctx.fill(); ctx.stroke();
+  for (let i=0;i<4;i++){ ctx.beginPath(); ctx.arc(s*.48, -s*.36 + i*s*.24, s*.17, 0, 7); ctx.fill(); ctx.stroke(); }
+  ctx.beginPath(); ctx.ellipse(s*.08, -s*.47, s*.26, s*.14, -.2, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+function gloveOpen(h, s, ang){   // guante siguiendo los dedos detectados
+  const fw = s*.3;
+  const w = h[0]; ctx.save(); ctx.translate(w.x, w.y); ctx.rotate(ang);
+  ctx.lineWidth = Math.max(2, s*.11); ctx.strokeStyle = AMV.ink; ctx.fillStyle = "#fff";
+  ctx.beginPath(); ctx.roundRect(-s*.5, -s*.4, s*.34, s*.8, s*.12); ctx.fill(); ctx.stroke(); ctx.restore();
+  ctx.beginPath(); for (const i of [0,1,5,9,13,17]) ctx.lineTo(h[i].x, h[i].y); ctx.closePath();
+  ctx.lineJoin = "round"; ctx.lineWidth = fw*2.5; ctx.strokeStyle = AMV.ink; ctx.stroke(); ctx.fillStyle = "#fff"; ctx.fill(); ctx.lineWidth = fw*1.9; ctx.strokeStyle = "#fff"; ctx.stroke();
+  for (const f of [[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]]){
+    const pts = f.map(i=>h[i]); ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y); for (const q of pts.slice(1)) ctx.lineTo(q.x,q.y);
+    ctx.strokeStyle = AMV.ink; ctx.lineWidth = fw*1.45; ctx.stroke(); ctx.strokeStyle = "#fff"; ctx.lineWidth = fw; ctx.stroke();
+  }
+}
+function shoe(x, y, dx, dy, out, s){   // zapatilla blanca con suela negra
+  const L = Math.hypot(dx,dy); let ang, flip;
+  if (L < s*.35){ flip = out; ang = 0; }
+  else if (dx >= 0){ flip = 1; ang = Math.atan2(dy, dx); }
+  else { flip = -1; ang = Math.atan2(-dy, -dx); }
+  ang = Math.max(-.9, Math.min(.9, ang));
+  ctx.save(); ctx.translate(x,y); ctx.rotate(ang); ctx.scale(flip,1);
+  ctx.lineWidth = Math.max(2, s*.08); ctx.strokeStyle = AMV.ink;
+  ctx.beginPath(); ctx.ellipse(s*.12, s*.13, s*.62, s*.3, 0, 0, 7); ctx.fillStyle = AMV.ink; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(s*.06, -s*.03, s*.58, s*.34, 0, 0, 7); ctx.fillStyle = "#fff"; ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(-s*.18, -s*.14, s*.14, s*.08, -.4, 0, 7); ctx.fillStyle = "rgba(255,255,255,1)"; ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = s*.035;
+  for (let i=0;i<4;i++){ const xx = -s*.25 + i*s*.18; ctx.beginPath(); ctx.moveTo(xx, s*.31); ctx.lineTo(xx + s*.1, s*.36); ctx.stroke(); }
+  ctx.restore();
+}
+function drawOjo(rig, t){
+  const {p, shW, head, hands} = rig, cfg = S.cfg;
+  const hip = mid(p[23],p[24]), hc = head.c;
+  const span = Math.max(dist(hc, hip), shW*1.6);
+  const C = P((hc.x+hip.x)/2, (hc.y+hip.y)/2 - span*.04);
+  const R = span*.6, lw = Math.max(3, shW*.1);
+  const sL = Math.sign(p[11].x - p[12].x) || -1;          // lado de la pantalla del hombro 11
+  const onBall = (ax, ay) => { const l = Math.hypot(ax,ay)||1; return P(C.x + ax/l*R*.96, C.y + ay/l*R*.96); };
+  const tr = (q, from, to, k) => P(to.x + (q.x-from.x)*k, to.y + (q.y-from.y)*k);
+  const gS = shW*.42, fS = shW*.6;
+  // piernas y zapatillas (detrás de la bola)
+  for (const [h,k,a,he,f,sd] of [[23,25,27,29,31,sL],[24,26,28,30,32,-sL]]){
+    const A = onBall(sd*.45, 1), kl = .82;
+    const K = tr(p[k], p[h], A, kl), An = tr(p[a], p[h], A, kl), He = tr(p[he], p[h], A, kl), To = tr(p[f], p[h], A, kl);
+    hose(A, K, An, lw);
+    shoe((He.x+To.x)/2 + sd*fS*.15, An.y + fS*.18, To.x-He.x, To.y-He.y, sd, fS);
+  }
+  if (cfg.ex.has("alas")) drawWings(P(C.x, C.y - R*.4), shW, cfg, t);
+  if (cfg.ex.has("capa")) drawCape(p, shW, cfg, t);
+  // la bola del ojo
+  ctx.save(); ctx.translate(C.x, C.y); ctx.rotate(head.roll*.5);
+  const g = ctx.createRadialGradient(-R*.3,-R*.35,R*.1,0,0,R); g.addColorStop(0,"#ffffff"); g.addColorStop(.72,"#f6f6f6"); g.addColorStop(1,"#d7dae0");
+  ctx.beginPath(); ctx.arc(0,0,R,0,7); ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = R*.045; ctx.strokeStyle = AMV.ink; ctx.stroke();
+  // iris
+  const gx = head.yaw*R*.12, ix = -R*.04 + gx, iy = -R*.2, ir = R*.4;
+  const irisCol = cfg.rainbow ? hue(0, t/1000) : cfg.acc, irisHex = /^#/.test(irisCol) ? irisCol : "#f0c35c";
+  ctx.beginPath(); ctx.arc(ix, iy, ir, 0, 7); ctx.fillStyle = irisCol; ctx.fill();
+  ctx.strokeStyle = shade(irisHex, .35); ctx.lineWidth = ir*.035; ctx.lineCap = "round";
+  for (let i=0;i<30;i++){ const a = i/30*Math.PI*2; ctx.beginPath(); ctx.moveTo(ix+Math.cos(a)*ir*.58, iy+Math.sin(a)*ir*.58); ctx.lineTo(ix+Math.cos(a)*ir*.9, iy+Math.sin(a)*ir*.9); ctx.stroke(); }
+  ctx.beginPath(); ctx.arc(ix, iy, ir, 0, 7); ctx.strokeStyle = shade(irisHex, -.15); ctx.lineWidth = ir*.05; ctx.stroke();
+  // pupila y brillos
+  const pr = ir*.5, px = ix + head.yaw*ir*.22, py = iy;
+  ctx.beginPath(); ctx.arc(px, py, pr, 0, 7); ctx.fillStyle = AMV.ink; ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(px - pr*.42, py - pr*.42, pr*.32, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(px + pr*.38, py + pr*.55, pr*.14, 0, 7); ctx.fill();
+  // párpado (parpadeo)
+  const bl = Math.min(1, ((head.blinkA||0) + (head.blinkB||0))/2);
+  if (bl > .05){
+    ctx.save(); ctx.beginPath(); ctx.arc(ix, iy, ir*1.06, 0, 7); ctx.clip();
+    const ly = iy - ir*1.06 + ir*2.12*bl;
+    ctx.fillStyle = g; ctx.fillRect(ix - ir*1.1, iy - ir*1.1, ir*2.2, ly - (iy - ir*1.1));
+    ctx.beginPath(); ctx.moveTo(ix - ir*1.1, ly); ctx.quadraticCurveTo(ix, ly + ir*.12, ix + ir*1.1, ly); ctx.strokeStyle = AMV.ink; ctx.lineWidth = R*.035; ctx.stroke();
+    ctx.restore();
+  }
+  // boca: sonrisa con dientes, se abre al hablar
+  const open = Math.min(1, head.jaw||0), sm = head.smile||0;
+  const mx = gx*1.15 + R*.04, my = R*.38, w = R*.43, top = my - R*.06;
+  const depth = R*(.3 + open*.22 + sm*.05);
+  const mouth = () => { ctx.beginPath(); ctx.moveTo(mx-w, top); ctx.quadraticCurveTo(mx, top + R*.12, mx+w, top); ctx.quadraticCurveTo(mx + w*.1, top + depth*2, mx-w, top); ctx.closePath(); };
+  mouth(); ctx.fillStyle = AMV.ink; ctx.fill();
+  ctx.save(); mouth(); ctx.clip();
+  ctx.beginPath(); ctx.ellipse(mx + w*.15, top + depth*.95, w*.55, depth*.45, 0, 0, 7); ctx.fillStyle = "#e5677b"; ctx.fill();
+  const tH = R*.11;
+  ctx.beginPath(); ctx.moveTo(mx-w, top); ctx.quadraticCurveTo(mx, top + R*.12, mx+w, top); ctx.lineTo(mx+w, top + tH); ctx.quadraticCurveTo(mx, top + R*.12 + tH, mx-w, top + tH); ctx.closePath(); ctx.fillStyle = "#fff"; ctx.fill();
+  ctx.strokeStyle = AMV.ink; ctx.lineWidth = R*.014;
+  for (let i=-3;i<=3;i++){ const x = mx + i*w*.24; ctx.beginPath(); ctx.moveTo(x, top - R*.02); ctx.lineTo(x, top + R*.06 + tH); ctx.stroke(); }
+  ctx.restore();
+  mouth(); ctx.strokeStyle = AMV.ink; ctx.lineWidth = R*.035; ctx.lineJoin = "round"; ctx.stroke();
+  ctx.lineWidth = R*.028; ctx.lineCap = "round";
+  for (const s of [-1,1]){ ctx.beginPath(); ctx.moveTo(mx + s*w*.92, top - R*.06); ctx.quadraticCurveTo(mx + s*w*1.12, top, mx + s*w*.98, top + R*.07); ctx.stroke(); }
+  if (cfg.ex.has("corona")){ ctx.fillStyle="#ffcf33"; ctx.strokeStyle=AMV.ink; ctx.lineWidth=R*.03; ctx.beginPath(); const y=-R*.92, cw=R*.35;
+    ctx.moveTo(-cw,y); ctx.lineTo(-cw,y-R*.25); ctx.lineTo(-cw*.5,y-R*.1); ctx.lineTo(0,y-R*.32); ctx.lineTo(cw*.5,y-R*.1); ctx.lineTo(cw,y-R*.25); ctx.lineTo(cw,y); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+  ctx.restore();
+  // brazos y guantes (delante)
+  for (const [s,e,wi,sd] of [[11,13,15,sL],[12,14,16,-sL]]){
+    const ay = Math.max(-.75, Math.min(.2, (p[s].y - C.y)/R));
+    const A = onBall(sd*Math.sqrt(1-ay*ay), ay);
+    const E = tr(p[e], p[s], A, 1), W = tr(p[wi], p[s], A, 1);
+    hose(A, E, W, lw);
+    const ang = Math.atan2(W.y-E.y, W.x-E.x);
+    if (hands[wi]){ const dx = W.x - p[wi].x, dy = W.y - p[wi].y; gloveOpen(hands[wi].map(q => P(q.x+dx, q.y+dy)), gS, ang); }
+    else glove(W.x + Math.cos(ang)*gS*.3, W.y + Math.sin(ang)*gS*.3, ang, gS);
+  }
+  if (cfg.ex.has("brillos")) drawSparkles(P(C.x, C.y - R*.6), shW, t);
 }
 
 function drawHand(p, wi, hand, armW, cfg, col, elbow){
