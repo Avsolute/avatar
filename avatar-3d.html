@@ -236,6 +236,7 @@ const CHARS = {
   hada:      {k:["hada","princesa","mariposa","duende"], body:"#ffd1f0", acc:"#b06bff", ex:["alas","brillos","corona"], bg:"bosque"},
   superheroe:{k:["superheroe","heroe","super","heroina","superheroina"], body:"#3355ff", acc:"#ff3344", ex:["capa","antifaz"], bg:"ciudad"},
   monstruo:  {k:["monstruo","bicho","alien","extraterrestre","marciano"], body:"#8e44ff", acc:"#c6ff3d", ex:["cuernos","tresojos"], bg:"espacio"},
+  ojo:       {k:[], body:"#ffffff", acc:"#f0c35c", ex:[], bg:"marca"},
   muneco:    {k:[], body:"#ffcf5a", acc:"#ff6b6b", ex:[], bg:"arcoiris"},
 };
 const COLORS = {
@@ -252,14 +253,14 @@ const BGWORDS = {espacio:"espacio", estrellas:"espacio", galaxia:"espacio", luna
 
 function parsePrompt(text){
   const t = norm(text), words = t.split(/[^a-z0-9ñ]+/).filter(Boolean);
-  let type = "muneco";
-  for (const [k,c] of Object.entries(CHARS)) if (c.k.some(w => words.includes(w) || t.includes(w))) { type = k; break; }
+  let type = /ahora ?me ?veo|avsolute|globo ocular|\bojo\b|\bojito\b|\bojazo\b/.test(t) ? "ojo" : "muneco";
+  if (type === "muneco") for (const [k,c] of Object.entries(CHARS)) if (c.k.some(w => words.includes(w) || t.includes(w))) { type = k; break; }
   const base = CHARS[type];
   const cfg = {type, body:base.body, acc:base.acc, rainbow:false, ex:new Set(base.ex), bg:base.bg};
   if (/(de colores|multicolor|arco ?iris|colorid)/.test(t)) cfg.rainbow = true;
   const cols = words.filter(w => COLORS[w]).map(w => COLORS[w]);
-  if (cols[0]) cfg.body = cols[0];
-  if (cols[1]) cfg.acc = cols[1];
+  if (type === "ojo"){ if (cols[0]) cfg.acc = cols[0]; }   // en el ojo, el color elegido es el del iris
+  else { if (cols[0]) cfg.body = cols[0]; if (cols[1]) cfg.acc = cols[1]; }
   for (const w of words) { if (EXTRAS[w]) cfg.ex.add(EXTRAS[w]); if (BGWORDS[w]) cfg.bg = BGWORDS[w]; }
   if (/sin alas/.test(t)) cfg.ex.delete("alas");
   if (/sin cola/.test(t)) cfg.ex.delete("cola");
@@ -267,9 +268,9 @@ function parsePrompt(text){
 }
 
 /* ---------------- UI de inicio ---------------- */
-const QUICK = ["Quiero ser un unicornio de colores","Un robot plateado con antena","Un dragón verde con alas","Un gato naranja",
+const QUICK = ["Quiero ser Ahora me veo","Quiero ser un unicornio de colores","Un robot plateado con antena","Un dragón verde con alas","Un gato naranja",
   "Un astronauta en el espacio","Un hada rosa con corona","Un superhéroe azul con capa","Un monstruo morado","Un oso marrón en el bosque","Un perro en la playa"];
-const BGS = [["auto","Automático (según el avatar)"],["arcoiris","Arcoíris"],["espacio","Espacio"],["bosque","Bosque"],["ciudad","Ciudad"],
+const BGS = [["auto","Automático (según el avatar)"],["marca","Amarillo «Ahora me veo»"],["arcoiris","Arcoíris"],["espacio","Espacio"],["bosque","Bosque"],["ciudad","Ciudad"],
   ["playa","Playa"],["nieve","Nieve"],["croma","Croma verde"],["camara","Cámara real"],["liso","Negro liso"],["imagen","Imagen propia"]];
 for (const sel of [$("sBg"), $("sBg2")]) for (const [v,n] of BGS) sel.add(new Option(n, v));
 function fillChips(el, input){
@@ -453,6 +454,7 @@ function disposeAvatar(){ if (!AV) return; scene.remove(AV.root); AV.root.traver
 
 function buildAvatar(cfg){
   disposeAvatar();
+  if (cfg.type === "ojo") return buildOjo(cfg);
   const root = new THREE.Group(); scene.add(root);
   const bodyCol = cfg.body, acc = cfg.acc;
   const partMat = (i) => { const m = toon(cfg.rainbow ? new THREE.Color().setHSL(((i*52)%360)/360, .95, .62) : bodyCol); if (cfg.rainbow){ m.userData.hueIdx = i; rainbowMats.push(m); } return m; };
@@ -580,6 +582,133 @@ function buildAvatar(cfg){
   AV = {root, limbs, feet, hands, torso, torsoMesh, neck, deco, back, wings, cape, tail, head, eyes, mouthOpen, smile, sparkles, cfg};
 }
 
+/* ---------------- «Ahora me veo» en 3D: ojo con guantes y zapatillas ---------------- */
+const AMV = {yellow:"#f0c35c", ink:"#16191d"};
+const OUTLINE = new THREE.MeshBasicMaterial({color: AMV.ink, side: THREE.BackSide}); OUTLINE.__shared = true;
+function outlined(geo, mat, parent, k=1.1){ const m = mesh(geo, mat, parent); const o = new THREE.Mesh(geo, OUTLINE); o.scale.setScalar(k); m.add(o); return m; }
+// Cara dibujada en un lienzo (mismo dibujo que la versión móvil) y proyectada de frente sobre la bola
+function drawOjoFace(g, S2, cfg, st){
+  const R = S2/2; g.clearRect(0,0,S2,S2); g.save(); g.translate(R, R);
+  const ink = AMV.ink, ix = -R*.04, iy = -R*.2, ir = R*.4;
+  g.beginPath(); g.arc(ix, iy, ir, 0, 7); g.fillStyle = cfg.acc; g.fill();
+  const lite = new THREE.Color(cfg.acc).lerp(new THREE.Color("#ffffff"), .35).getStyle(), dk = new THREE.Color(cfg.acc).multiplyScalar(.82).getStyle();
+  g.strokeStyle = lite; g.lineWidth = ir*.035; g.lineCap = "round";
+  for (let i=0;i<30;i++){ const a = i/30*Math.PI*2; g.beginPath(); g.moveTo(ix+Math.cos(a)*ir*.58, iy+Math.sin(a)*ir*.58); g.lineTo(ix+Math.cos(a)*ir*.9, iy+Math.sin(a)*ir*.9); g.stroke(); }
+  g.beginPath(); g.arc(ix, iy, ir, 0, 7); g.strokeStyle = dk; g.lineWidth = ir*.05; g.stroke();
+  const pr = ir*.5; g.beginPath(); g.arc(ix, iy, pr, 0, 7); g.fillStyle = ink; g.fill();
+  g.fillStyle = "#fff"; g.beginPath(); g.arc(ix - pr*.42, iy - pr*.42, pr*.32, 0, 7); g.fill(); g.beginPath(); g.arc(ix + pr*.38, iy + pr*.55, pr*.14, 0, 7); g.fill();
+  if (st.blink > .05){ g.save(); g.beginPath(); g.arc(ix, iy, ir*1.06, 0, 7); g.clip();
+    const ly = iy - ir*1.06 + ir*2.12*st.blink; g.fillStyle = "#ffffff"; g.fillRect(ix - ir*1.1, iy - ir*1.1, ir*2.2, ly - (iy - ir*1.1));
+    g.beginPath(); g.moveTo(ix - ir*1.1, ly); g.quadraticCurveTo(ix, ly + ir*.12, ix + ir*1.1, ly); g.strokeStyle = ink; g.lineWidth = R*.035; g.stroke(); g.restore(); }
+  const mx = R*.04, my = R*.38, w = R*.43, top = my - R*.06, depth = R*(.3 + st.open*.22 + st.smile*.05);
+  const mouth = () => { g.beginPath(); g.moveTo(mx-w, top); g.quadraticCurveTo(mx, top + R*.12, mx+w, top); g.quadraticCurveTo(mx + w*.1, top + depth*2, mx-w, top); g.closePath(); };
+  mouth(); g.fillStyle = ink; g.fill();
+  g.save(); mouth(); g.clip();
+  g.beginPath(); g.ellipse(mx + w*.15, top + depth*.95, w*.55, depth*.45, 0, 0, 7); g.fillStyle = "#e5677b"; g.fill();
+  const tH = R*.11; g.beginPath(); g.moveTo(mx-w, top); g.quadraticCurveTo(mx, top + R*.12, mx+w, top); g.lineTo(mx+w, top + tH); g.quadraticCurveTo(mx, top + R*.12 + tH, mx-w, top + tH); g.closePath(); g.fillStyle = "#fff"; g.fill();
+  g.strokeStyle = ink; g.lineWidth = R*.014; for (let i=-3;i<=3;i++){ const x = mx + i*w*.24; g.beginPath(); g.moveTo(x, top - R*.02); g.lineTo(x, top + R*.06 + tH); g.stroke(); }
+  g.restore();
+  mouth(); g.strokeStyle = ink; g.lineWidth = R*.035; g.lineJoin = "round"; g.stroke();
+  g.lineWidth = R*.028; g.lineCap = "round";
+  for (const s of [-1,1]){ g.beginPath(); g.moveTo(mx + s*w*.92, top - R*.06); g.quadraticCurveTo(mx + s*w*1.12, top, mx + s*w*.98, top + R*.07); g.stroke(); }
+  g.restore();
+}
+function buildOjo(cfg){
+  const root = new THREE.Group(); scene.add(root);
+  const white = toon("#ffffff"), black = toon(AMV.ink);
+  // bola (radio 1, se escala al tamaño de la persona)
+  const ball = new THREE.Group(); root.add(ball);
+  outlined(new THREE.SphereGeometry(1, 48, 32), white, ball, 1.035);
+  // capa de la cara: media esfera delantera con coordenadas de textura «de frente»
+  const fg = new THREE.SphereGeometry(1.004, 64, 48, 0, Math.PI, 0, Math.PI);
+  const pos = fg.attributes.position, uv = fg.attributes.uv;
+  for (let i=0;i<pos.count;i++) uv.setXY(i, pos.getX(i)*.5 + .5, pos.getY(i)*.5 + .5);
+  const fc = document.createElement("canvas"); fc.width = fc.height = 512;
+  const ftex = new THREE.CanvasTexture(fc); ftex.colorSpace = THREE.SRGBColorSpace; ftex.anisotropy = 4;
+  const fmat = new THREE.MeshToonMaterial({color:"#ffffff", map: ftex, gradientMap: gradTex, transparent: true, alphaTest: .35});
+  mesh(fg, fmat, ball, false);
+  // extremidades de goma: 6 tramos por brazo/pierna
+  const NS = 6, LR = .024;
+  const mkHose = () => ({segs: Array.from({length:NS}, () => mesh(G.cyl, black, root)), joints: Array.from({length:NS+1}, () => { const j = mesh(G.sphere, black, root); j.scale.setScalar(LR); return j; })});
+  const hoses = {arms:[mkHose(), mkHose()], legs:[mkHose(), mkHose()]};
+  // guantes (puño) y dedos para cuando se detecta la mano
+  const mkGlove = () => { const g = new THREE.Group(); root.add(g);
+    const fist = new THREE.Group(); g.add(fist);
+    const cuff = outlined(new THREE.CylinderGeometry(1,1,1,20), white, fist, 1.12); cuff.scale.set(.05,.035,.05); cuff.position.y = -.035;
+    const palm = outlined(G.sphere, white, fist, 1.1); palm.scale.set(.062,.06,.05); palm.position.y = .035;
+    for (let i=0;i<4;i++){ const k = outlined(G.sphere, white, fist, 1.12); k.scale.setScalar(.027); k.position.set(-.042 + i*.028, .085, .018); }
+    const th = outlined(G.sphere, white, fist, 1.12); th.scale.set(.026,.034,.024); th.position.set(-.06,.045,.03); th.rotation.z = .5;
+    const fingers = [[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]].map(ch => ({ch, segs: ch.slice(1).map(()=>mesh(G.cyl, white, g)), tips: ch.map(()=>{ const s = mesh(G.sphere, white, g, false); s.scale.setScalar(.02); return s; })}));
+    const openPalm = outlined(G.sphere, white, g, 1.08);
+    return {g, fist, fingers, openPalm}; };
+  const gloves = {15: mkGlove(), 16: mkGlove()};
+  // zapatillas
+  const mkShoe = () => { const g = new THREE.Group(); root.add(g);
+    const sole = mesh(G.sphere, black, g); sole.scale.set(.085,.035,.145); sole.position.set(0,.03,.03);
+    const up = outlined(G.sphere, white, g, 1.07); up.scale.set(.08,.065,.13); up.position.set(0,.07,.025);
+    return g; };
+  const shoes = [mkShoe(), mkShoe()];
+  AV = {kind:"ojo", root, ball, ftex, fc, fkey:"", hoses, gloves, shoes, cfg, limbs:[], feet:[], tail:[], wings:[], sparkles:[], eyes:[]};
+}
+function placeHose(H, pts){ for (let i=0;i<H.segs.length;i++) segment(H.segs[i], pts[i], pts[i+1], .024); H.joints.forEach((j,i) => j.position.copy(pts[i])); }
+function bez(a, b, c, n){ const ctl = b.clone().multiplyScalar(2).sub(a.clone().add(c).multiplyScalar(.5)); const out = [];
+  for (let i=0;i<=n;i++){ const s = i/n, k1 = (1-s)*(1-s), k2 = 2*(1-s)*s, k3 = s*s; out.push(V(a.x*k1+ctl.x*k2+c.x*k3, a.y*k1+ctl.y*k2+c.y*k3, a.z*k1+ctl.z*k2+c.z*k3)); } return out; }
+function poseOjo(rig, t){
+  const {p, head, hands} = rig, A3 = AV;
+  const sh = p[11].clone().add(p[12]).multiplyScalar(.5), hip = p[23].clone().add(p[24]).multiplyScalar(.5);
+  const up = sh.clone().sub(hip).normalize();
+  const right = (p[11].x > p[12].x ? p[11].clone().sub(p[12]) : p[12].clone().sub(p[11])); right.sub(up.clone().multiplyScalar(right.dot(up))).normalize();
+  const fwd = right.clone().cross(up).normalize();
+  const torsoQ = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fwd));
+  const span = Math.max(head.c.distanceTo(hip), .45);
+  const C = head.c.clone().add(hip).multiplyScalar(.5).sub(up.clone().multiplyScalar(span*.04));
+  const R = span*.6;
+  A3.ball.position.copy(C); A3.ball.scale.setScalar(R);
+  A3.ball.quaternion.copy(torsoQ).slerp(head.q, .65);
+  // cara (solo se redibuja cuando cambia)
+  const st = {blink: Math.round(Math.min(1,(head.blinkA+head.blinkB)/2)*8)/8, open: Math.round(Math.min(1, head.jaw)*10)/10, smile: Math.round((head.smile||0)*4)/4};
+  const key = st.blink + "|" + st.open + "|" + st.smile;
+  if (key !== A3.fkey){ A3.fkey = key; drawOjoFace(A3.fc.getContext("2d"), A3.fc.width, A3.cfg, st); A3.ftex.needsUpdate = true; }
+  const onBall = (sx, sy) => C.clone().add(right.clone().multiplyScalar(sx).add(up.clone().multiplyScalar(sy)).normalize().multiplyScalar(R*.97));
+  const tr = (q, from, to, k) => to.clone().add(q.clone().sub(from).multiplyScalar(k));
+  const sideOf = i => Math.sign(p[i].clone().sub(C).dot(right)) || (i % 2 ? 1 : -1);
+  // piernas y zapatillas
+  let minY = Infinity; const legData = [];
+  [[23,25,27,29,31],[24,26,28,30,32]].forEach(([h,k,a,he,f], n) => {
+    const sd = sideOf(h), A = onBall(sd*.42, -1), kl = .8;
+    const K = tr(p[k], p[h], A, kl), An = tr(p[a], p[h], A, kl), He = tr(p[he], p[h], A, kl), To = tr(p[f], p[h], A, kl);
+    legData.push({n, A, K, An, He, To, sd}); minY = Math.min(minY, An.y - .06);
+  });
+  const drop = minY - 0;   // bajar todo para que las zapatillas pisen el suelo
+  A3.root.position.y = -drop;
+  for (const L of legData){
+    placeHose(A3.hoses.legs[L.n], bez(L.A, L.K, L.An, 6));
+    const S1 = A3.shoes[L.n]; S1.position.copy(L.An).add(V(0,-.06,0));
+    const d = L.To.clone().sub(L.He); d.y = 0; let yaw = d.length() > .05 ? Math.atan2(d.x, d.z) : L.sd*.25;
+    S1.rotation.set(0, yaw, 0);
+  }
+  // brazos y guantes
+  [[11,13,15],[12,14,16]].forEach(([s,e,wi], n) => {
+    const sd = sideOf(s), ay = Math.max(-.6, Math.min(.75, p[s].clone().sub(C).dot(up)/R));
+    const A = onBall(sd*Math.sqrt(1-ay*ay), ay);
+    const E = tr(p[e], p[s], A, 1), W = tr(p[wi], p[s], A, 1);
+    placeHose(A3.hoses.arms[n], bez(A, E, W, 6));
+    const Gv = A3.gloves[wi], hp = hands[wi];
+    Gv.fist.visible = !hp; Gv.openPalm.visible = !!hp;
+    Gv.fingers.forEach(fg => { fg.segs.forEach(m=>m.visible=!!hp); fg.tips.forEach(m=>m.visible=!!hp); });
+    if (!hp){ const dir = W.clone().sub(E).normalize(); Gv.fist.position.copy(W); Gv.fist.quaternion.setFromUnitVectors(UP, dir); }
+    else {
+      const off = W.clone().sub(p[wi]), h = hp.map(q => q.clone().add(off)).map(q => q.clone().sub(h0(hp,off)).multiplyScalar(1.6).add(h0(hp,off)));
+      const c = V(); for (const i of [0,5,9,13,17]) c.add(h[i]); c.multiplyScalar(.2);
+      Gv.openPalm.position.copy(c); Gv.openPalm.quaternion.setFromUnitVectors(UP, h[9].clone().sub(h[0]).normalize()); Gv.openPalm.scale.set(.065,.07,.04);
+      for (const fg of Gv.fingers){ const ch = [0, ...fg.ch];
+        for (let i=0;i<fg.segs.length;i++) segment(fg.segs[i], h[ch[i+1]], h[ch[i+2]], .02);
+        fg.tips.forEach((tp,i) => tp.position.copy(h[fg.ch[i]])); }
+    }
+  });
+}
+const h0 = (hp, off) => hp[0].clone().add(off);
+
 /* ---------------- Detección y suavizado ---------------- */
 const T = {pose:null, poseImg:null, hands:[], handT:0, face:null, faceT:0, lastSeen:0, frame:0, lastVT:-1};
 const sm = {};
@@ -693,6 +822,7 @@ function segment(m, a, b, r){ _d.subVectors(b, a); const len = _d.length() || 1e
 function ellipsoid(m, a, b, rw, rd){ _d.subVectors(b, a); const len = _d.length() || 1e-4; m.position.addVectors(a, b).multiplyScalar(.5); m.quaternion.setFromUnitVectors(UP, _d.divideScalar(len)); m.scale.set(rw, len/2 + rd*.6, rd); }
 
 function poseAvatar(rig, t){
+  if (AV.kind === "ojo") return poseOjo(rig, t);
   const {p, head, hands} = rig, A3 = AV, cfg = A3.cfg;
   // colores arcoíris animados
   for (const m of rainbowMats) m.color.setHSL((((m.userData.hueIdx*52) + t/1000*40) % 360)/360, .95, .62);
@@ -822,6 +952,14 @@ function renderBg(type, W, H){
     g.fillStyle="#fff"; g.beginPath(); g.moveTo(0,H*.8); g.quadraticCurveTo(W*.3,H*.72,W*.6,H*.8); g.quadraticCurveTo(W*.85,H*.86,W,H*.78); g.lineTo(W,H); g.lineTo(0,H); g.fill();
     for (let i=0;i<7;i++){ const x=R()*W, h=H*(.2+R()*.15), w=h*.5, b=H*.82; g.fillStyle="#2f5e4a"; g.beginPath(); g.moveTo(x,b-h); g.lineTo(x+w/2,b); g.lineTo(x-w/2,b); g.fill();
       g.fillStyle="#fff"; g.beginPath(); g.moveTo(x,b-h); g.lineTo(x+w*.15,b-h*.7); g.lineTo(x-w*.15,b-h*.7); g.fill(); }
+  } else if (type === "marca"){
+    g.fillStyle = AMV.yellow; g.fillRect(0,0,W,H);
+    const rg = g.createRadialGradient(W/2,H*.45,0,W/2,H*.45,Math.max(W,H)*.75); rg.addColorStop(0,"rgba(255,255,255,.16)"); rg.addColorStop(1,"rgba(120,80,0,.10)");
+    g.fillStyle = rg; g.fillRect(0,0,W,H);
+    const fs = u*.055; g.fillStyle = AMV.ink; g.textAlign = "right"; g.textBaseline = "alphabetic";
+    g.font = `900 ${fs}px "Arial Black","Segoe UI Black",Impact,system-ui,sans-serif`; g.fillText("AHORA ME VEO", W - u*.04, H*.06 + fs);
+    g.font = `800 ${fs*.42}px system-ui,sans-serif`; const avW = g.measureText("Avsolute.").width; g.fillText("Avsolute.", W - u*.04, H*.06 + fs*1.6);
+    g.font = `400 ${fs*.42}px system-ui,sans-serif`; g.fillText("by ", W - u*.04 - avW, H*.06 + fs*1.6);
   } else if (type === "croma"){ g.fillStyle = "#00b140"; g.fillRect(0,0,W,H); }
   else { g.fillStyle = "#000"; g.fillRect(0,0,W,H); }
   return c;
@@ -1066,6 +1204,7 @@ $("go").onclick = async () => {
   savePrefs(); resize(); keepAwake();
   $("start").style.display = "none"; S.camOn = true; ensureLoop();
   if (pendingModel){ const f = pendingModel; loadModel(f, prettyName(f.name)).then(ok => ok && saveLocalModel(f)); }
+  else if (S.cfg.type === "ojo") useBuiltin("builtin:ojo", true);
   else if (!MODEL) startActiveCharacter();
   msg("Toca ⚙️ para cambiar avatar, fondo o voz", 3500);
 };
@@ -1074,7 +1213,9 @@ $("go").onclick = async () => {
 const sheet = $("sheet"), shadeEl = $("shade");
 const openSheet = o => { sheet.classList.toggle("open", o); shadeEl.classList.toggle("open", o); };
 $("bSet").onclick = () => openSheet(true); $("close").onclick = shadeEl.onclick = () => openSheet(false);
-function applyPrompt(){ S.cfg = parsePrompt($("prompt2").value); bgKey = ""; savePrefs(); msg("Avatar: " + S.cfg.type.replace("muneco","muñeco")); }
+function applyPrompt(){ S.cfg = parsePrompt($("prompt2").value); bgKey = ""; savePrefs();
+  if (S.cfg.type === "ojo"){ unloadModel(); libActive("builtin:ojo"); renderLibrary(); msg("Ahora me veo"); return; }
+  msg("Avatar: " + S.cfg.type.replace("muneco","muñeco")); }
 $("apply").onclick = () => { applyPrompt(); openSheet(false); };
 $("prompt2").addEventListener("keydown", e => { if (e.key === "Enter") { applyPrompt(); openSheet(false); } });
 $("sBg2").onchange = e => { S.bg = e.target.value; bgKey = ""; savePrefs(); if (S.bg==="imagen" && !S.bgImg) $("bgFile").click(); };
@@ -1543,15 +1684,16 @@ async function useFileChar(id, quiet){
   try { const rec = await idbDo("readonly", st => st.get(id)); if (rec) return loadModel(rec.blob, rec.name); } catch(e){}
   if (!quiet) msg("Ese personaje ya no está en este navegador", 3000);
 }
-const BUILTINS = [["builtin:muneco","🧸 Muñeco rápido (según la frase)"],["builtin:ejemplo","👧 Personaje realista de ejemplo"]];
+const BUILTINS = [["builtin:ojo","👁️ Ahora me veo"],["builtin:muneco","🧸 Muñeco rápido (según la frase)"],["builtin:ejemplo","👧 Personaje realista de ejemplo"]];
 async function useBuiltin(bid, quiet){
   libActive(bid); openSheet(false); renderLibrary();
   if (bid === "builtin:ejemplo") await loadModel(SAMPLE_VRM, "personaje de ejemplo (pixiv)");
+  else if (bid === "builtin:ojo"){ unloadModel(); const q = "Quiero ser Ahora me veo"; $("prompt").value = $("prompt2").value = q; S.cfg = parsePrompt(q); bgKey = ""; savePrefs(); if (!quiet) msg("Ahora me veo"); }
   else { unloadModel(); if (!quiet) msg("Muñeco 3D según la frase"); }
 }
 function startActiveCharacter(){
   const act = libActive();
-  if (act === "builtin:ejemplo") return useBuiltin(act, true);
+  if (act === "builtin:ejemplo" || act === "builtin:ojo") return useBuiltin(act, true);
   if (act && (act.startsWith("repo:") || act.startsWith("local:"))) return useFileChar(act, true);
   const ch = libLoad().find(x => x.id === act); if (ch) useCharacter(ch.st);
 }
