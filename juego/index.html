@@ -192,8 +192,8 @@ function frameCamera(){
   const asp = innerWidth/innerHeight;
   camera.aspect = asp; camera.fov = asp < .9 ? 50 : 38;
   const t = Math.tan(THREE.MathUtils.degToRad(camera.fov/2));
-  const d = Math.max(1.25/t, 1.55/(t*asp));
-  camera.position.set(0, 1.22, d); camera.lookAt(0, 1.15, 0); camera.updateProjectionMatrix();
+  const d = Math.max(1.08/t, 1.38/(t*asp)); // cámara más cerca: avatar más grande
+  camera.position.set(0, 1.12, d); camera.lookAt(0, 1.05, 0); camera.updateProjectionMatrix();
 }
 function resize(){
   renderer.setPixelRatio(Math.min(devicePixelRatio||1, S.quality==="full" ? 2 : 1.5));
