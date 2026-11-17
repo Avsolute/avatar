@@ -1674,10 +1674,21 @@ async function loadRepoModel(f){
   return ON_PAGES ? false : loadModel("../" + encodeURIComponent(f), prettyName(f));
 }
 const prettyName = f => f.replace(/\.(vrm|glb)$/i,"").replace(/[_-]+/g," ").trim();
+/* Personajes del repositorio: la lista se pide a GitHub, pero si la API falla (límite de 60 consultas por hora
+   y conexión, red del móvil…) se usa la última lista guardada en el aparato o, como mínimo, los fijos. */
+const REPO_FIXED = ["Chico01.vrm"];
+function setRepoChars(names){
+  const all = [...new Set([...REPO_FIXED, ...names])];
+  REPO_CHARS = all.map(n => ({id:"repo:"+n, name:prettyName(n), url:encodeURIComponent(n)}));
+  renderLibrary();
+}
 async function loadRepoChars(){
+  let saved = []; try { saved = JSON.parse(localStorage.getItem("avatar3d_repo") || "[]"); } catch(e){}
+  setRepoChars(Array.isArray(saved) ? saved : []);
   try { const r = await fetch(`https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/`, {cache:"no-store"}); if (!r.ok) return;
-    REPO_CHARS = (await r.json()).filter(f => /\.(vrm|glb)$/i.test(f.name)).map(f => ({id:"repo:"+f.name, name:prettyName(f.name), url:encodeURIComponent(f.name)}));
-    renderLibrary(); } catch(e){}
+    const names = (await r.json()).filter(f => /\.(vrm|glb)$/i.test(f.name)).map(f => f.name);
+    try { localStorage.setItem("avatar3d_repo", JSON.stringify(names)); } catch(e){}
+    setRepoChars(names); } catch(e){}
 }
 function idb(){ return new Promise((res, rej) => { const r = indexedDB.open("avatar3d", 1); r.onupgradeneeded = () => r.result.createObjectStore("modelos", {keyPath:"id"}); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
 async function idbDo(mode, fn){ const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction("modelos", mode), st = tx.objectStore("modelos"), rq = fn(st); tx.oncomplete = () => res(rq && rq.result); tx.onerror = () => rej(tx.error); }); }
