@@ -409,9 +409,9 @@ const camera = new THREE.PerspectiveCamera(35, 1, .05, 60);
 const controls = new OrbitControls(camera, cv);
 controls.enablePan = false; controls.enableDamping = true; controls.minDistance = 1.6; controls.maxDistance = 9;
 controls.maxPolarAngle = Math.PI*.55;
-const VIEWS = {frontal:[0,1.15,4.4], tres:[2.6,1.4,3.6], lateral:[4.4,1.2,0], arriba:[0,3.4,3.2]};
+const VIEWS = {frontal:[0,1.05,3.6], tres:[2.15,1.3,2.95], lateral:[3.6,1.1,0], arriba:[0,2.9,2.6]}; // cámara más cerca: avatar más grande
 let viewName = "frontal", autoRotate = false;
-function setView(name){ viewName = name; const p = VIEWS[name] || VIEWS.frontal; camera.position.set(...p); controls.target.set(0,.95,0); controls.update(); }
+function setView(name){ viewName = name; const p = VIEWS[name] || VIEWS.frontal; camera.position.set(...p); controls.target.set(0,.9,0); controls.update(); }
 setView("frontal");
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.6));
@@ -1559,7 +1559,7 @@ async function loadBase(id){
   BASE_LOAD.p = (async () => {
     let ok = false;
     if (id === "builtin:ejemplo") ok = await loadModel(SAMPLE_VRM, "personaje de ejemplo");
-    else if (id.startsWith("repo:")) ok = await loadModel(encodeURIComponent(id.slice(5)), prettyName(id.slice(5)));
+    else if (id.startsWith("repo:")) ok = await loadRepoModel(id.slice(5));
     else if (id.startsWith("local:")){ try { const rec = await idbDo("readonly", s => s.get(id)); if (rec) ok = await loadModel(rec.blob, rec.name); } catch(e){} }
     if (ok) MODEL.baseId = id; else msg("No se encontró la base del personaje", 3500);
     return ok;
@@ -1665,22 +1665,19 @@ function closeEditor(){
 const GH = (() => { const h = location.hostname, p = location.pathname.split("/").filter(Boolean);
   return h.endsWith(".github.io") ? {owner: h.split(".")[0], repo: p[0] || ""} : {owner:"Avsolute", repo:"avatar"}; })();
 let REPO_CHARS = [], LOCAL_CHARS = [];
-const prettyName = f => f.replace(/\.(vrm|glb)$/i,"").replace(/[_-]+/g," ").trim();
-/* Personajes del repositorio: la lista se pide a GitHub, pero si la API falla (límite de 60 consultas por hora
-   y conexión, red del móvil…) se usa la última lista guardada en el aparato o, como mínimo, los fijos. */
-const REPO_FIXED = ["Chico01.vrm"];
-function setRepoChars(names){
-  const all = [...new Set([...REPO_FIXED, ...names])];
-  REPO_CHARS = all.map(n => ({id:"repo:"+n, name:prettyName(n), url:encodeURIComponent(n)}));
-  renderLibrary();
+// Dirección del archivo de un personaje del repositorio: en GitHub Pages va junto a la página;
+// en el portátil (archivo local o localhost) se descarga de GitHub, y si no hay internet se busca en la carpeta Avatar.
+const ON_PAGES = location.hostname.endsWith(".github.io");
+const repoUrl = f => ON_PAGES ? encodeURIComponent(f) : `https://raw.githubusercontent.com/${GH.owner}/${GH.repo}/main/${encodeURIComponent(f)}`;
+async function loadRepoModel(f){
+  if (await loadModel(repoUrl(f), prettyName(f))) return true;
+  return ON_PAGES ? false : loadModel("../" + encodeURIComponent(f), prettyName(f));
 }
+const prettyName = f => f.replace(/\.(vrm|glb)$/i,"").replace(/[_-]+/g," ").trim();
 async function loadRepoChars(){
-  let saved = []; try { saved = JSON.parse(localStorage.getItem("avatar3d_repo") || "[]"); } catch(e){}
-  setRepoChars(Array.isArray(saved) ? saved : []);
   try { const r = await fetch(`https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/`, {cache:"no-store"}); if (!r.ok) return;
-    const names = (await r.json()).filter(f => /\.(vrm|glb)$/i.test(f.name)).map(f => f.name);
-    try { localStorage.setItem("avatar3d_repo", JSON.stringify(names)); } catch(e){}
-    setRepoChars(names); } catch(e){}
+    REPO_CHARS = (await r.json()).filter(f => /\.(vrm|glb)$/i.test(f.name)).map(f => ({id:"repo:"+f.name, name:prettyName(f.name), url:encodeURIComponent(f.name)}));
+    renderLibrary(); } catch(e){}
 }
 function idb(){ return new Promise((res, rej) => { const r = indexedDB.open("avatar3d", 1); r.onupgradeneeded = () => r.result.createObjectStore("modelos", {keyPath:"id"}); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
 async function idbDo(mode, fn){ const db = await idb(); return new Promise((res, rej) => { const tx = db.transaction("modelos", mode), st = tx.objectStore("modelos"), rq = fn(st); tx.oncomplete = () => res(rq && rq.result); tx.onerror = () => rej(tx.error); }); }
@@ -1691,7 +1688,7 @@ async function saveLocalModel(file){
 }
 async function useFileChar(id, quiet){
   libActive(id); openSheet(false); renderLibrary();
-  if (id.startsWith("repo:")){ const f = id.slice(5); return loadModel(encodeURIComponent(f), prettyName(f)); }
+  if (id.startsWith("repo:")) return loadRepoModel(id.slice(5));
   try { const rec = await idbDo("readonly", st => st.get(id)); if (rec) return loadModel(rec.blob, rec.name); } catch(e){}
   if (!quiet) msg("Ese personaje ya no está en este navegador", 3000);
 }
