@@ -45,8 +45,8 @@
   #title{position:fixed;z-index:10;left:calc(env(safe-area-inset-left) + 14px);top:calc(env(safe-area-inset-top) + 12px);background:rgba(10,20,30,.7);padding:8px 16px;border-radius:14px;font-size:20px;font-weight:700}
   #instr{position:fixed;z-index:10;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 12px);max-width:60vw;text-align:center;background:rgba(10,20,30,.78);padding:10px 26px;border-radius:18px;font-size:clamp(24px,3.4vw,40px);font-weight:800;text-shadow:0 2px 4px rgba(0,0,0,.5);transition:opacity .6s ease}
   #instr.off{opacity:0;pointer-events:none}
-  /* Los puntos van encima de la cabeza del personaje (posición calculada en cada fotograma) */
-  #score{position:fixed;z-index:11;left:50%;top:30%;transform:translate(-50%,-100%);white-space:nowrap;background:rgba(10,20,30,.78);padding:8px 20px;border-radius:18px;font-size:clamp(26px,3.4vw,42px);font-weight:900;color:#ffd84a;border:2px solid rgba(255,216,74,.55);pointer-events:none}
+  /* Los puntos van abajo a la derecha, a la altura entre pies y rodillas, por encima de la barra de botones */
+  #score{position:fixed;z-index:11;right:calc(env(safe-area-inset-right) + 18px);top:70%;transform:translateY(-50%);white-space:nowrap;background:rgba(10,20,30,.78);padding:8px 20px;border-radius:18px;font-size:clamp(26px,3.4vw,42px);font-weight:900;color:#ffd84a;border:2px solid rgba(255,216,74,.55);pointer-events:none}
   #score.corner{left:auto;right:calc(env(safe-area-inset-right) + 14px);top:calc(env(safe-area-inset-top) + 12px);transform:none}
   @media (max-width:900px){ #title{display:none} #instr{max-width:64vw;left:14px;transform:none;text-align:left} }
   #score.pop{animation:pop .45s ease}
@@ -816,19 +816,18 @@ const IN = {txt:"", at:0};
 const instr = txt => { txt = txt || ""; if (txt !== IN.txt){ IN.txt = txt; IN.at = performance.now(); $("instr").textContent = txt; }
   $("instr").style.display = txt ? "" : "none"; };
 function updateInstr(now){ if (!IN.txt) return; const on = G.paused || ((now - IN.at) % INSTR_EVERY) < INSTR_SHOW; $("instr").classList.toggle("off", !on); }
-/* Puntos encima de la cabeza del personaje */
-const _hp = new THREE.Vector3(), SCP = {x:0, y:0, init:false};
+/* Puntos abajo a la derecha, a la altura entre pies y rodillas (fija, sin moverse con el personaje),
+   siempre por encima de la barra de botones */
+const _hp = new THREE.Vector3();
 function updateScorePos(){
-  const el = $("score"), hb = MODEL?.bones?.head;
-  if (!hb){ el.classList.add("corner"); return; }
-  hb.getWorldPosition(_hp); _hp.y += .3; _hp.project(camera);
-  const W = innerWidth, H = innerHeight;
-  if (_hp.z > 1){ el.classList.add("corner"); return; }
-  const r = el.getBoundingClientRect(), hw = r.width/2 + 10;
-  let x = (_hp.x + 1)/2*W, y = (1 - _hp.y)/2*H;
-  x = Math.min(W - hw, Math.max(hw, x)); y = Math.min(H - 10, Math.max(r.height + 10, y));
-  if (!SCP.init){ SCP.x = x; SCP.y = y; SCP.init = true; } else { SCP.x += (x - SCP.x)*.25; SCP.y += (y - SCP.y)*.25; }
-  el.classList.remove("corner"); el.style.left = SCP.x.toFixed(1) + "px"; el.style.top = SCP.y.toFixed(1) + "px";
+  const el = $("score"), H = innerHeight;
+  _hp.set(0, .25, 0).project(camera);              // 25 cm del suelo: entre pies y rodillas
+  let y = (1 - _hp.y)/2*H;
+  const r = el.getBoundingClientRect(), bar = $("bar");
+  const barTop = (bar && bar.offsetParent !== null) ? bar.getBoundingClientRect().top : H;
+  y = Math.min(y, barTop - 14 - r.height/2);         // que no tape los botones de abajo
+  y = Math.max(y, r.height/2 + 10);
+  el.classList.remove("corner"); el.style.left = ""; el.style.top = y.toFixed(1) + "px";
 }
 function updateScore(popIt){ const el = $("score"); el.textContent = `⭐ ${G.score} de ${S.goal}`; if (popIt){ el.classList.remove("pop"); void el.offsetWidth; el.classList.add("pop"); } }
 function card(big, txt, btns=[]){
