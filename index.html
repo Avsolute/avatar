@@ -526,11 +526,14 @@ function renderBg(type, W, H){
     g.fillStyle = AMV.yellow; g.fillRect(0,0,W,H);
     const rg = g.createRadialGradient(W/2,H*.45,0,W/2,H*.45,Math.max(W,H)*.75); rg.addColorStop(0,"rgba(255,255,255,.16)"); rg.addColorStop(1,"rgba(120,80,0,.10)");
     g.fillStyle = rg; g.fillRect(0,0,W,H);
-    const fs = u*.055; g.fillStyle = AMV.ink; g.textAlign = "right"; g.textBaseline = "alphabetic";
-    g.font = `900 ${fs}px "Arial Black","Segoe UI Black",Impact,system-ui,sans-serif`; g.fillText("AHORA ME VEO", W - u*.04, H*.06 + fs);
-    g.font = `400 ${fs*.42}px system-ui,sans-serif`; const by = "by ", av = "Avsolute.";
-    g.font = `800 ${fs*.42}px system-ui,sans-serif`; const avW = g.measureText(av).width; g.fillText(av, W - u*.04, H*.06 + fs*1.6);
-    g.font = `400 ${fs*.42}px system-ui,sans-serif`; g.fillText(by, W - u*.04 - avW, H*.06 + fs*1.6);
+    // Texto de la marca centrado arriba, sobre el avatar
+    const fs = u*.06, cx = W/2, y1 = H*.035 + fs; g.fillStyle = AMV.ink; g.textBaseline = "alphabetic"; g.textAlign = "center";
+    g.font = `900 ${fs}px "Arial Black","Segoe UI Black",Impact,system-ui,sans-serif`; g.fillText("AHORA ME VEO", cx, y1);
+    g.font = `400 ${fs*.42}px system-ui,sans-serif`; const byW = g.measureText("by ").width;
+    g.font = `800 ${fs*.42}px system-ui,sans-serif`; const avW = g.measureText("Avsolute.").width;
+    const x0 = cx - (byW + avW)/2, y2 = y1 + fs*.62; g.textAlign = "left";
+    g.font = `400 ${fs*.42}px system-ui,sans-serif`; g.fillText("by ", x0, y2);
+    g.font = `800 ${fs*.42}px system-ui,sans-serif`; g.fillText("Avsolute.", x0 + byW, y2);
   } else if (type === "croma"){ g.fillStyle = "#00b140"; g.fillRect(0,0,W,H); }
   else { g.fillStyle = "#000"; g.fillRect(0,0,W,H); }
   return c;
